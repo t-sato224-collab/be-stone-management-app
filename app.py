@@ -128,3 +128,38 @@ else:
                 st.rerun()
         elif l['status'] == "in_progress": col_b.warning("実施中")
         else: col_b.success("完了")
+        # --- 6. 業務遂行モード（修正版：カメラを最優先表示） ---
+# 自分が「実施中」にしているタスクを探す
+active_task = next((l for l in l_data if l['status'] == "in_progress" and l['staff_id'] == staff['id']), None)
+
+if active_task and not on_break:
+    st.divider()
+    # 進行中のタスクを画面の一番上に持ってくるための強調
+    st.error(f"🚨 現在実行中の業務があります: {active_task['task_master']['locations']['name']}")
+    st.subheader("ステップ1：現場のQRコードをスキャン")
+    
+    # keyをユニークにするためにlogのIDを混ぜる
+    qr_in = st.camera_input("QRコードを枠内に収めてください", key=f"qr_cam_{active_task['id']}")
+    
+    if qr_in:
+        scanned_data = decode_qr(qr_in)
+        if scanned_data == active_task['task_master']['locations']['qr_token']:
+            st.success("✅ 現地到着を確認しました！")
+            st.subheader("ステップ2：清掃後の証拠写真を撮影")
+            
+            ph_in = st.camera_input("完了写真を撮影してください", key=f"photo_cam_{active_task['id']}")
+            if ph_in:
+                if st.button("報告を送信して完了する", type="primary", key=f"send_{active_task['id']}"):
+                    # 写真保存
+                    f_path = f"{active_task['id']}.jpg"
+                    supabase.storage.from_("task-photos").upload(f_path, ph_in.getvalue(), {"upsert":"true"})
+                    # DB更新
+                    supabase.table("task_logs").update({
+                        "status":"completed",
+                        "completed_at":now_jst.isoformat(),
+                        "photo_url":f_path
+                    }).eq("id",active_task['id']).execute()
+                    st.balloons()
+                    st.rerun()
+        else:
+            st.error("❌ 場所が違います。正しいエリアのQRコードをスキャンしてください。")
