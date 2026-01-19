@@ -27,7 +27,6 @@ if 'staff_info' not in st.session_state:
 
 # --- 4. 共通関数 ---
 def decode_qr(image):
-    """カメラ入力からQRを解析"""
     try:
         file_bytes = np.asarray(bytearray(image.read()), dtype=np.uint8)
         opencv_image = cv2.imdecode(file_bytes, 1)
@@ -52,17 +51,17 @@ if not st.session_state.logged_in:
             else: st.error("IDまたはパスワードが正しくありません")
     st.stop()
 
-# --- B. ログイン後のデータ取得（ここがエラー防止の鍵） ---
+# --- B. ログイン後のデータ取得 ---
 staff = st.session_state.staff_info
 
-# 勤怠・休憩ステータスを最初に定義してNameErrorを防止
+# 勤怠・休憩ステータスを最初に定義
 t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).eq("work_date", today_jst).order("clock_in_at", desc=True).limit(1).execute()
 curr_card = t_res.data[0] if t_res.data else None
 
 b_res = supabase.table("breaks").select("*").eq("staff_id", staff['id']).eq("work_date", today_jst).is_("break_end_at", "null").execute()
 on_break = b_res.data[0] if b_res.data else None
 
-# 今日の全タスクを取得（並び替え）
+# 今日の全タスクを取得
 logs_res = supabase.table("task_logs").select("*, task_master(*, locations(*))").eq("work_date", today_jst).execute()
 l_data = sorted(logs_res.data, key=lambda x: (x['task_master']['target_hour'] or 0, x['task_master']['target_minute'] or 0))
 
@@ -102,7 +101,6 @@ if admin_mode:
 
 # --- D. スタッフ画面 ---
 st.title("薬石岩盤浴 業務管理")
-st.info(f"現在の日本時刻: {current_hour:02d}:{current_minute:02d}")
 
 # 1. 勤怠UI
 st.divider()
@@ -133,7 +131,7 @@ st.divider()
 if on_break:
     st.warning("現在休憩中です。業務に戻る際は「業務戻り」を押してください。")
 else:
-    # 今日のタスク生成（未生成の場合のみ）
+    # タスク自動生成
     tms = supabase.table("task_master").select("*").execute()
     for tm in tms.data:
         try: supabase.table("task_logs").insert({"task_id":tm["id"], "work_date":today_jst, "status":"pending"}).execute()
@@ -142,7 +140,6 @@ else:
     tab1, tab2 = st.tabs(["📋 今日の業務", "🕒 履歴"])
     with tab1:
         st.write(f"### {current_hour}時台の予定")
-        # 30分刻み対応の表示
         display_tasks = [l for l in l_data if l['task_master']['target_hour'] == current_hour]
         if not display_tasks:
             st.write("この時間の予定はありません。")
@@ -164,13 +161,25 @@ else:
         if h_res.data:
             st.table([{"日付":r['work_date'], "出勤":r['clock_in_at'][11:16], "退勤":r['clock_out_at'][11:16] if r['clock_out_at'] else "中"} for r in h_res.data])
 
-# 3. 業務遂行モード（カメラ起動）
+# 3. 業務遂行モード（着手キャンセルボタン追加）
 if not on_break:
     active_task = next((l for l in l_data if l['status'] == "in_progress" and l['staff_id'] == staff['id']), None)
     if active_task:
         st.divider()
-        st.error(f"📍 実行中: {active_task['task_master']['locations']['name']}")
-        # 確実に起動するようにキーをタスクIDと紐付け
+        # ここにキャンセルボタンを配置
+        c_left, c_right = st.columns([3, 1])
+        with c_left:
+            st.error(f"📍 実行中: {active_task['task_master']['locations']['name']}")
+        with c_right:
+            if st.button("着手を取消", key=f"cancel_{active_task['id']}"):
+                # DBステータスをpendingに戻す
+                supabase.table("task_logs").update({
+                    "status": "pending",
+                    "started_at": None,
+                    "staff_id": None
+                }).eq("id", active_task['id']).execute()
+                st.rerun()
+
         qr_in = st.camera_input("ステップ1：現場のQRをスキャン", key=f"qr_{active_task['id']}")
         if qr_in:
             scanned_data = decode_qr(qr_in)
