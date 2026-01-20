@@ -18,39 +18,33 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 st.set_page_config(page_title="BE STONE Pro", layout="wide", initial_sidebar_state="auto")
 
-# --- 2. 究極の視認性改善CSS（メニュー文字色を完全な黒に強制） ---
+# --- 2. 究極のブランド・デザイン（CSS） ---
 st.markdown("""
     <style>
-    /* 全体背景 */
+    /* 全体背景：清潔感のあるオフホワイト */
     .stApp { background-color: #F8F9FA !important; color: #2D3748 !important; }
 
-    /* 1. モバイルサイドバー設定 */
+    /* 1. モバイルサイドバー：横幅75%、フォント26px、間隔35px、文字色 黒 */
     @media (max-width: 768px) {
         section[data-testid="stSidebar"] {
             width: 75vw !important;
             min-width: 75vw !important;
             background-color: #FFFFFF !important;
         }
-        
-        /* 【最重要】メニュー項目のテキストをあらゆる階層で「漆黒」にする */
-        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label,
-        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p,
-        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label span,
-        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label div {
-            color: #000000 !important; /* 完全な黒 */
+        /* メニュー項目のフォント・色・間隔を強制指定 */
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
             font-size: 26px !important; 
             font-weight: 900 !important;
-            opacity: 1 !important;
-            -webkit-text-fill-color: #000000 !important; /* iPhone等のSafari対策 */
-        }
-
-        /* 項目間の余白（35px）と区切り線 */
-        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
+            color: #000000 !important; /* 背景に同化しない純黒 */
             padding-top: 35px !important; 
             padding-bottom: 35px !important; 
-            border-bottom: 2px solid #EDF2F7 !important;
             margin-bottom: 0px !important;
+            border-bottom: 2px solid #EDF2F7 !important;
             display: block !important;
+        }
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p {
+            color: #000000 !important;
+            font-size: 26px !important;
         }
     }
 
@@ -63,7 +57,7 @@ st.markdown("""
         }
     }
 
-    /* 3. ボタン：ブランドカラー (#75C9D7) / 白文字固定 */
+    /* 3. ボタン：ターコイズブルー (#75C9D7) / 白文字固定 */
     div.stButton > button, [data-testid="stCameraInput"] button {
         background-color: #75C9D7 !important; 
         color: #FFFFFF !important;
@@ -98,9 +92,11 @@ st.markdown("""
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'staff_info' not in st.session_state: st.session_state.staff_info = None
 
+# ブラウザの記憶を取得
 saved_id = streamlit_js_eval(js_expressions='localStorage.getItem("staff_id")', key='L_ID')
 saved_key = streamlit_js_eval(js_expressions='localStorage.getItem("session_key")', key='L_KEY')
 
+# 自動復旧（ログイン画面が表示されている間にバックグラウンドで動作）
 if not st.session_state.logged_in and saved_id and saved_key and saved_id != "null":
     try:
         res = supabase.table("staff").select("*").eq("staff_id", saved_id).eq("session_key", saved_key).execute()
@@ -110,12 +106,8 @@ if not st.session_state.logged_in and saved_id and saved_key and saved_id != "nu
             st.rerun()
     except: pass
 
-# --- A. ログイン画面 ---
+# --- A. ログイン画面（PCフリーズを避けるため、何があってもこの画面を出す） ---
 if not st.session_state.logged_in:
-    if saved_id is None:
-        st_autorefresh(interval=1000, limit=3, key="sync_init")
-        st.stop()
-
     c_l, c_m, c_r = st.columns([1, 2, 1])
     with c_m:
         if os.path.exists("logo.png"):
@@ -124,8 +116,8 @@ if not st.session_state.logged_in:
         st.markdown("<p style='text-align: center; color: #A0AEC0; letter-spacing: 4px; font-size: 12px; margin-bottom: 30px;'>OPERATION MANAGEMENT</p>", unsafe_allow_html=True)
         
         with st.form("login_form"):
-            u_id = st.text_input("STAFF ID", placeholder="ID")
-            u_pw = st.text_input("PASSWORD", type="password", placeholder="PASS")
+            u_id = st.text_input("STAFF ID", placeholder="スタッフIDを入力")
+            u_pw = st.text_input("PASSWORD", type="password", placeholder="パスワードを入力")
             if st.form_submit_button("SYSTEM LOGIN", use_container_width=True):
                 res = supabase.table("staff").select("*").eq("staff_id", u_id).eq("password", u_pw).execute()
                 if res.data:
@@ -151,7 +143,7 @@ if not check_res.data or check_res.data['session_key'] is None:
     streamlit_js_eval(js_expressions='localStorage.clear()')
     st.session_state.logged_in = False; st.rerun()
 
-# 同期データ取得
+# 同期データ
 t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
 curr_card = t_res.data[0] if t_res.data else None
 b_res = supabase.table("breaks").select("*").eq("staff_id", staff['id']).is_("break_end_at", "null").order("break_start_at", desc=True).limit(1).execute()
@@ -183,13 +175,13 @@ def render_task_execution(task):
     
     if not st.session_state[qr_v_key]:
         st.subheader("1. 現場QRをスキャン")
-        qr_in = st.camera_input("QR撮影", key=f"qr_{task['id']}")
+        qr_in = st.camera_input("QRを撮影してください", key=f"qr_{task['id']}")
         if qr_in and decode_qr(qr_in) == task['task_master']['locations']['qr_token']:
             st.session_state[qr_v_key] = True; st.rerun()
     else:
         st.subheader("2. 完了写真撮影")
-        ph_in = st.camera_input("完了写真", key=f"ph_{task['id']}")
-        if ph_in and st.button("✅ 報告を送信", type="primary", use_container_width=True):
+        ph_in = st.camera_input("完了写真を撮影してください", key=f"ph_{task['id']}")
+        if ph_in and st.button("✅ 報告を送信して完了", type="primary", use_container_width=True):
             f_p = f"{task['id']}.jpg"
             supabase.storage.from_("task-photos").upload(f_p, ph_in.getvalue(), {"upsert":"true"})
             supabase.table("task_logs").update({"status":"completed","completed_at":now_jst.isoformat(),"photo_url":f_p}).eq("id",task['id']).execute()
