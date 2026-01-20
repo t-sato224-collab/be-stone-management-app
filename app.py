@@ -18,11 +18,11 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 st.set_page_config(page_title="BE STONE Pro", layout="wide", initial_sidebar_state="auto")
 
-# --- 2. 究極のシンプルCSS（サイドバー文字色を全階層で黒に強制） ---
+# --- 2. 究極の視認性改善CSS（メニュー文字色を完全な黒に強制） ---
 st.markdown("""
     <style>
-    /* 全体背景：白固定 */
-    .stApp { background-color: #FFFFFF !important; color: #1A202C !important; }
+    /* 全体背景 */
+    .stApp { background-color: #F8F9FA !important; color: #2D3748 !important; }
 
     /* 1. モバイルサイドバー設定 */
     @media (max-width: 768px) {
@@ -32,24 +32,29 @@ st.markdown("""
             background-color: #FFFFFF !important;
         }
         
-        /* 【核心】ラジオボタン内の全ての要素(*)を真っ黒に固定 */
-        div[data-testid="stSidebar"] .stRadio * {
-            color: #000000 !important;
-            -webkit-text-fill-color: #000000 !important; /* Safari対策 */
-            font-size: 26px !important;
+        /* 【最重要】メニュー項目のテキストをあらゆる階層で「漆黒」にする */
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label,
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p,
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label span,
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label div {
+            color: #000000 !important; /* 完全な黒 */
+            font-size: 26px !important; 
             font-weight: 900 !important;
+            opacity: 1 !important;
+            -webkit-text-fill-color: #000000 !important; /* iPhone等のSafari対策 */
         }
 
-        /* 項目間の余白調整 */
+        /* 項目間の余白（35px）と区切り線 */
         div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
             padding-top: 35px !important; 
             padding-bottom: 35px !important; 
             border-bottom: 2px solid #EDF2F7 !important;
             margin-bottom: 0px !important;
+            display: block !important;
         }
     }
 
-    /* 2. PC版：中央寄せレイアウト（既存の良好な状態） */
+    /* 2. PC版：中央寄せレイアウト */
     @media (min-width: 769px) {
         .main .block-container {
             max-width: 850px !important;
@@ -58,7 +63,7 @@ st.markdown("""
         }
     }
 
-    /* 3. ボタン：ブランドカラー (#75C9D7) / 白文字固定 / 黒靄除去 */
+    /* 3. ボタン：ブランドカラー (#75C9D7) / 白文字固定 */
     div.stButton > button, [data-testid="stCameraInput"] button {
         background-color: #75C9D7 !important; 
         color: #FFFFFF !important;
@@ -66,7 +71,7 @@ st.markdown("""
         border-radius: 15px !important;
         height: 3.5em !important;
         font-weight: bold !important;
-        box-shadow: none !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important;
         opacity: 1 !important;
     }
     div.stButton > button * { color: #FFFFFF !important; }
@@ -93,11 +98,9 @@ st.markdown("""
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'staff_info' not in st.session_state: st.session_state.staff_info = None
 
-# ブラウザの記憶を取得
 saved_id = streamlit_js_eval(js_expressions='localStorage.getItem("staff_id")', key='L_ID')
 saved_key = streamlit_js_eval(js_expressions='localStorage.getItem("session_key")', key='L_KEY')
 
-# 自動復旧（記憶があればDB照合）
 if not st.session_state.logged_in and saved_id and saved_key and saved_id != "null":
     try:
         res = supabase.table("staff").select("*").eq("staff_id", saved_id).eq("session_key", saved_key).execute()
@@ -109,7 +112,6 @@ if not st.session_state.logged_in and saved_id and saved_key and saved_id != "nu
 
 # --- A. ログイン画面 ---
 if not st.session_state.logged_in:
-    # 修正点：System Syncingなどの文言を完全に削除
     if saved_id is None:
         st_autorefresh(interval=1000, limit=3, key="sync_init")
         st.stop()
@@ -149,7 +151,7 @@ if not check_res.data or check_res.data['session_key'] is None:
     streamlit_js_eval(js_expressions='localStorage.clear()')
     st.session_state.logged_in = False; st.rerun()
 
-# 同期データ
+# 同期データ取得
 t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
 curr_card = t_res.data[0] if t_res.data else None
 b_res = supabase.table("breaks").select("*").eq("staff_id", staff['id']).is_("break_end_at", "null").order("break_start_at", desc=True).limit(1).execute()
