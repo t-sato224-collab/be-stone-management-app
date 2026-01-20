@@ -3,3 +3,4 @@ supabase
 opencv-python-headless
 pillow
 numpy
+streamlit-js-eval
