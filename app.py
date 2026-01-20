@@ -10,47 +10,46 @@ from streamlit_js_eval import streamlit_js_eval
 from streamlit_autorefresh import st_autorefresh
 import os
 
-# --- 1. システム設定（アプリ名とアイコンの変更） ---
+# --- 1. システム設定 ---
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
 JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
-# 【ここを編集】page_titleがタブの名前、page_iconがアイコンになります
-APP_NAME = "BE STONE Pro"
-LOGO_FILE = "logo.png"
-
-st.set_page_config(
-    page_title=APP_NAME, 
-    page_icon=LOGO_FILE if os.path.exists(LOGO_FILE) else "💎", # ロゴがあればロゴ、なければ宝石絵文字
-    layout="wide", 
-    initial_sidebar_state="auto"
-)
+st.set_page_config(page_title="BE STONE Pro", layout="wide", initial_sidebar_state="auto")
 
 # --- 2. 視認性最優先・ライトモード強制CSS ---
 st.markdown("""
     <style>
-    /* アプリ全体をライトモードに強制固定 */
+    /* 1. アプリ全体をライトモード（白背景・黒文字）に強制固定 */
     :root { color-scheme: light !important; }
-    .stApp { background-color: #FFFFFF !important; color: #000000 !important; }
+    
+    .stApp { 
+        background-color: #FFFFFF !important; 
+        color: #000000 !important; 
+    }
 
     /* 全てのテキスト要素を黒色に固定 */
     .stMarkdown, p, h1, h2, h3, h4, h5, h6, span, label, li, div {
         color: #000000 !important;
     }
 
-    /* 【PC限定】メイン画面の中央寄せ */
+    /* 2. 【PC限定】メイン画面の中央寄せ */
     @media (min-width: 769px) {
-        .main .block-container { max-width: 850px !important; margin: auto !important; }
+        .main .block-container {
+            max-width: 850px !important;
+            margin: auto !important;
+        }
     }
 
-    /* 【モバイル限定】サイドバー横幅 75% / メニュー文字巨大化 */
+    /* 3. 【モバイル限定】サイドバー横幅 75% / メニュー文字巨大化 */
     @media (max-width: 768px) {
         section[data-testid="stSidebar"] {
             width: 75vw !important;
             min-width: 75vw !important;
-            background-color: #F8F9FA !important;
+            background-color: #F8F9FA !important; /* サイドバーは極薄いグレー */
         }
+        /* メニュー（ラジオボタン）の文字を最大濃度で黒くする */
         div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p {
             font-size: 26px !important; 
             font-weight: 900 !important;
@@ -63,7 +62,7 @@ st.markdown("""
         }
     }
 
-    /* 【ボタン】黒靄排除 / ターコイズブルー固定 */
+    /* 4. 【ボタン】黒くなる現象を完全排除 / ターコイズブルー固定 */
     div.stButton > button, [data-testid="stCameraInput"] button {
         background-color: #75C9D7 !important;
         color: #FFFFFF !important;
@@ -75,12 +74,13 @@ st.markdown("""
         opacity: 1 !important;
         transition: none !important;
     }
+    /* ボタンの中の全テキストを白に固定 */
     div.stButton > button * { 
         color: #FFFFFF !important; 
         -webkit-text-fill-color: #FFFFFF !important;
     }
 
-    /* ログアウトボタン（赤） */
+    /* 5. ログアウトボタン（赤） */
     div.stButton > button[key="logout_btn"] { background-color: #FC8181 !important; }
 
     /* 不要パーツ隠蔽 */
@@ -96,6 +96,7 @@ if 'staff_info' not in st.session_state: st.session_state.staff_info = None
 saved_id = streamlit_js_eval(js_expressions='localStorage.getItem("staff_id")', key='L_ID')
 saved_key = streamlit_js_eval(js_expressions='localStorage.getItem("session_key")', key='L_KEY')
 
+# 自動ログイン
 if not st.session_state.logged_in and saved_id and saved_key:
     if saved_id != "null" and saved_key != "null":
         try:
@@ -110,8 +111,8 @@ if not st.session_state.logged_in and saved_id and saved_key:
 if not st.session_state.logged_in:
     c_l, c_m, c_r = st.columns([1, 2, 1])
     with c_m:
-        if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, use_container_width=True)
-        st.markdown(f"<h2 style='text-align: center;'>{APP_NAME} ログイン</h2>", unsafe_allow_html=True)
+        if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
+        st.markdown("<h2 style='text-align: center;'>BE STONE ログイン</h2>", unsafe_allow_html=True)
         with st.form("login_form"):
             u_id = st.text_input("STAFF ID")
             u_pw = st.text_input("PASSWORD", type="password")
@@ -125,7 +126,7 @@ if not st.session_state.logged_in:
                     st.session_state.logged_in = True
                     st.session_state.staff_info = res.data[0]
                     st.rerun()
-                else: st.error("IDまたはパスワードが正しくありません")
+                else: st.error("IDまたはパスワードが違います")
     st.stop()
 
 # --- 4. 共通データ同期 ---
@@ -134,13 +135,7 @@ now_utc = datetime.datetime.now(datetime.timezone.utc)
 now_jst = now_utc + datetime.timedelta(hours=9)
 today_jst = now_jst.date().isoformat()
 
-# セッション有効チェック
-check_res = supabase.table("staff").select("session_key").eq("id", staff['id']).single().execute()
-if not check_res.data or check_res.data['session_key'] is None:
-    streamlit_js_eval(js_expressions='localStorage.clear()')
-    st.session_state.logged_in = False; st.rerun()
-
-# 同期データ
+# 同期データ取得
 t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
 curr_card = t_res.data[0] if t_res.data else None
 logs_res = supabase.table("task_logs").select("*, task_master(*, locations(*))").eq("work_date", today_jst).execute()
@@ -184,7 +179,7 @@ def render_task_execution(task):
 if is_mobile and active_task: render_task_execution(active_task); st.stop()
 
 with st.sidebar:
-    if os.path.exists(LOGO_FILE): st.image(LOGO_FILE, use_container_width=True)
+    if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
     st.markdown(f"**{staff['name']} 様**")
     st.divider()
     choice = st.radio("MENU", ["📋 本日の業務", "🕒 履歴"] + (["📊 監視(Admin)", "📅 出勤簿(Admin)"] if staff['role'] == 'admin' else []), key="nav")
@@ -194,8 +189,8 @@ with st.sidebar:
         streamlit_js_eval(js_expressions='localStorage.clear()'); st.session_state.logged_in = False; st.rerun()
 
 # --- C. メイン表示 ---
-st.title(APP_NAME)
-st.caption(f"{now_jst.strftime('%Y/%m/%d %H:%M')} | {staff['name']}")
+st.title("BE STONE")
+st.caption(f"{now_jst.strftime('%H:%M')} | {staff['name']}")
 
 if choice == "📋 本日の業務":
     c1, c2, c3 = st.columns(3)
@@ -221,12 +216,5 @@ if choice == "📋 本日の業務":
                     if st.button("着手", key=f"s_{l['id']}", use_container_width=True):
                         supabase.table("task_logs").update({"status":"in_progress","staff_id":staff['id']}).eq("id",l['id']).execute(); st.rerun()
                 elif l['status'] == "in_progress": st.warning("対応中")
-                else: colb.success("完了")
+                else: st.success("完了")
             st.markdown("</div>", unsafe_allow_html=True)
-
-elif choice == "🕒 履歴":
-    h_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).order("clock_in_at", desc=True).limit(10).execute()
-    st.table([{"日付": r['work_date'], "出勤": r['clock_in_at'][11:16], "退勤": r['clock_out_at'][11:16] if r['clock_out_at'] else "中"} for r in h_res.data])
-
-elif "Admin" in choice:
-    st.write("管理者用データ")
