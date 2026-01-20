@@ -6,6 +6,7 @@ from PIL import Image
 import datetime
 import pandas as pd
 from streamlit_js_eval import streamlit_js_eval
+from streamlit_autorefresh import st_autorefresh # 追加：自動更新用
 
 # --- 1. システム設定 ---
 url = st.secrets["SUPABASE_URL"]
@@ -15,12 +16,9 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 st.set_page_config(page_title="天然薬石管理システム Pro", layout="wide")
 
-# --- 2. 日本時間の計算 ---
-now_utc = datetime.datetime.now(datetime.timezone.utc)
-now_jst = now_utc + datetime.timedelta(hours=9)
-today_jst = now_jst.date().isoformat()
-current_hour = now_jst.hour
-current_minute = now_jst.minute
+# --- 2. リアルタイム同期設定 ---
+# 5秒ごとに画面を自動更新し、他のデバイスの操作を反映させます
+st_autorefresh(interval=5000, key="datarefresh")
 
 # --- 3. CSS調整（UI最適化） ---
 st.markdown("""
@@ -32,8 +30,14 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 4. 【核心】デバイスごとの自動ログイン復元 ---
-# ブラウザのLocalStorageからIDを読み込む
+# --- 4. 時間の計算 ---
+now_utc = datetime.datetime.now(datetime.timezone.utc)
+now_jst = now_utc + datetime.timedelta(hours=9)
+today_jst = now_jst.date().isoformat()
+current_hour = now_jst.hour
+current_minute = now_jst.minute
+
+# --- 5. ログイン管理（LocalStorage連携） ---
 saved_id = streamlit_js_eval(js_expressions='localStorage.getItem("staff_id")', key='load_id')
 
 if 'logged_in' not in st.session_state:
@@ -41,7 +45,7 @@ if 'logged_in' not in st.session_state:
 if 'staff_info' not in st.session_state:
     st.session_state.staff_info = None
 
-# セッションが切れていても、ブラウザがIDを覚えていれば自動ログイン
+# 自動ログイン
 if not st.session_state.logged_in and saved_id:
     res = supabase.table("staff").select("*").eq("staff_id", saved_id).execute()
     if res.data:
@@ -61,14 +65,12 @@ def decode_qr(image):
 # --- A. ログイン画面 ---
 if not st.session_state.logged_in:
     st.title("🛡️ 業務管理システム ログイン")
-    st.info("一度ログインすると、このデバイスはログイン状態を記憶します。")
     with st.form("login"):
         input_id = st.text_input("スタッフID")
         input_pass = st.text_input("パスワード", type="password")
         if st.form_submit_button("ログイン"):
             res = supabase.table("staff").select("*").eq("staff_id", input_id).eq("password", input_pass).execute()
             if res.data:
-                # デバイスにIDを記憶させる（重要）
                 streamlit_js_eval(js_expressions=f'localStorage.setItem("staff_id", "{input_id}")', key='save_id')
                 st.session_state.logged_in = True
                 st.session_state.staff_info = res.data[0]
@@ -76,37 +78,30 @@ if not st.session_state.logged_in:
             else: st.error("IDまたはパスワードが正しくありません")
     st.stop()
 
-# --- B. 【核心】デバイス間ステータス完全同期ロジック ---
+# --- B. 【核心】DB同期データ取得 ---
 staff = st.session_state.staff_info
 
-# 「日付」に縛られず、DB全体から「まだ退勤していないレコード」を探す
-# これにより、PCで出勤した事実をスマホが即座に検知できます
-t_res = supabase.table("timecards").select("*")\
-    .eq("staff_id", staff['id'])\
-    .is_("clock_out_at", "null")\
-    .order("clock_in_at", desc=True).limit(1).execute()
+# 現在の状況をDBから強制取得（5秒ごとに最新化される）
+t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
 curr_card = t_res.data[0] if t_res.data else None
 
-# 休憩も同様に「まだ戻っていないレコード」を探す
-b_res = supabase.table("breaks").select("*")\
-    .eq("staff_id", staff['id'])\
-    .is_("break_end_at", "null")\
-    .order("break_start_at", desc=True).limit(1).execute()
+b_res = supabase.table("breaks").select("*").eq("staff_id", staff['id']).is_("break_end_at", "null").order("break_start_at", desc=True).limit(1).execute()
 on_break = b_res.data[0] if b_res.data else None
 
 # --- C. サイドバー ---
 st.sidebar.title("🏪 管理メニュー")
-st.sidebar.write(f"👤 **{staff['name']}** 様")
+st.sidebar.write(f"👤 **{staff['name']}** 様 (`{staff['role']}`)")
+
 menu_options = ["📋 本日の業務", "🕒 マイ勤怠履歴"]
 if staff['role'] == 'admin':
     menu_options += ["📊 リアルタイム監視", "📅 出勤簿データ出力"]
 
 choice = st.sidebar.radio("機能を切り替え", menu_options)
 
+# 物理的な余白（12回）
 for _ in range(12): st.sidebar.write("")
 st.sidebar.divider()
 if st.sidebar.button("🚪 ログアウト", use_container_width=True, key="logout_btn"):
-    # デバイスの記憶を消去
     streamlit_js_eval(js_expressions='localStorage.clear()', key='clear_id')
     st.session_state.logged_in = False
     st.rerun()
@@ -115,28 +110,20 @@ if st.sidebar.button("🚪 ログアウト", use_container_width=True, key="logo
 
 if choice == "📋 本日の業務":
     st.title("📋 本日の業務管理")
-    st.write(f"🕒 日本時刻: {current_hour:02d}:{current_minute:02d}")
+    st.info(f"🕒 現在の日本時刻: {current_hour:02d}:{current_minute:02d}")
     
     st.divider()
     c1, c2, c3 = st.columns(3)
 
     if not curr_card:
-        # 未出勤：出勤ボタンを表示
         if c1.button("🚀 出勤打刻", use_container_width=True, key="in_btn"):
-            supabase.table("timecards").insert({
-                "staff_id": staff['id'], "staff_name": staff['name'], 
-                "clock_in_at": now_jst.isoformat(), "work_date": today_jst
-            }).execute()
+            supabase.table("timecards").insert({"staff_id": staff['id'], "staff_name": staff['name'], "clock_in_at": now_jst.isoformat(), "work_date": today_jst}).execute()
             st.rerun()
     else:
-        # 出勤中（別のデバイスでの打刻もここで反映される）
         st.success(f"出勤中: {curr_card['clock_in_at'][11:16]}〜")
         if not on_break:
             if c2.button("☕ 休憩入り", use_container_width=True):
-                supabase.table("breaks").insert({
-                    "staff_id": staff['id'], "timecard_id": curr_card['id'], 
-                    "break_start_at": now_jst.isoformat(), "work_date": today_jst
-                }).execute()
+                supabase.table("breaks").insert({"staff_id": staff['id'], "timecard_id": curr_card['id'], "break_start_at": now_jst.isoformat(), "work_date": today_jst}).execute()
                 st.rerun()
             if c3.button("🏁 退勤打刻", use_container_width=True, type="primary"):
                 supabase.table("timecards").update({"clock_out_at": now_jst.isoformat()}).eq("id", curr_card['id']).execute()
@@ -198,13 +185,8 @@ elif choice == "🕒 マイ勤怠履歴":
     st.title("🕒 あなたの勤怠履歴")
     h_res = supabase.table("timecards").select("*, breaks(*)").eq("staff_id", staff['id']).order("clock_in_at", desc=True).limit(20).execute()
     if h_res.data:
-        df_history = []
-        for r in h_res.data:
-            c_in = datetime.datetime.fromisoformat(r['clock_in_at'])
-            c_out = datetime.datetime.fromisoformat(r['clock_out_at']) if r['clock_out_at'] else None
-            history_row = {"日付": r['work_date'], "出勤": c_in.strftime("%H:%M"), "退勤": c_out.strftime("%H:%M") if c_out else "中"}
-            df_history.append(history_row)
-        st.table(df_history)
+        history = [{"日付": r['work_date'], "出勤": r['clock_in_at'][11:16], "退勤": r['clock_out_at'][11:16] if r['clock_out_at'] else "中"} for r in h_res.data]
+        st.table(history)
 
 elif choice == "📊 リアルタイム監視":
     st.title("📊 管理者ダッシュボード")
@@ -241,10 +223,7 @@ elif choice == "📅 出勤簿データ出力":
             c_in = datetime.datetime.fromisoformat(r['clock_in_at'])
             c_out = datetime.datetime.fromisoformat(r['clock_out_at']) if r['clock_out_at'] else None
             br_s = sum([(datetime.datetime.fromisoformat(b['break_end_at']) - datetime.datetime.fromisoformat(b['break_start_at'])).total_seconds() for b in r.get('breaks', []) if b['break_end_at']])
-            work_str = "--"
-            if c_out:
-                act_s = max(0, (c_out - c_in).total_seconds() - br_s)
-                work_str = f"{int(act_s // 3600)}時間{int((act_s % 3600) // 60)}分"
+            work_str = f"{int((max(0, (c_out-c_in).total_seconds()-br_s))//3600)}時間{int(((max(0, (c_out-c_in).total_seconds()-br_s))%3600)//60)}分" if c_out else "--"
             df_l.append({"名前": r['staff_name'], "日付": r['work_date'], "出勤": c_in.strftime("%H:%M"), "退勤": c_out.strftime("%H:%M") if c_out else "未打刻", "休憩(分)": int(br_s // 60), "実働時間": work_str})
         df = pd.DataFrame(df_l)
         st.dataframe(df, use_container_width=True)
