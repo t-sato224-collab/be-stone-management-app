@@ -17,40 +17,39 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 st.set_page_config(page_title="天然薬石管理 Pro", layout="wide", initial_sidebar_state="expanded")
 
-# --- 2. 究極のデザイン設定（PC中央寄せ・コンパクト化・左側文字消去） ---
+# --- 2. 究極のデザイン設定（PC中央寄せ・コンパクトUI） ---
 st.markdown("""
     <style>
-    /* 1. 標準ナビとヘッダーを隠す */
+    /* 標準メニューとヘッダーを隠す */
     div[data-testid="stSidebarNav"] { display: none; }
     header { visibility: hidden; }
     
-    /* 2. PC版の中央寄せとフォームの横幅固定 (380px) */
+    /* PC版の中央寄せ・コンパクト設計 (画面幅769px以上) */
     @media (min-width: 769px) {
-        /* メインコンテンツの幅を制限 */
-        section.main > div {
-            max-width: 450px !important;
+        .main .block-container {
+            max-width: 420px !important; /* 全体を細く */
             margin: auto !important;
-            padding-top: 10vh !important;
+            padding-top: 15vh !important; /* 少し下げる */
         }
-        /* フォーム自体の横幅をさらにタイトに */
-        [data-testid="stForm"] {
-            width: 380px !important;
-            margin: auto !important;
-            padding: 2rem !important;
-            border-radius: 15px !important;
-        }
-        /* 入力ボックス内の文字を中央に */
+        /* テキストボックス内の文字を中央に */
         input { text-align: center !important; }
+        /* フォームの枠線を消してスッキリさせる（任意） */
+        [data-testid="stForm"] {
+            border: 1px solid #eee !important;
+            padding: 30px !important;
+            border-radius: 15px !important;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.05) !important;
+        }
     }
 
-    /* 3. モバイル版のデザイン調整 */
+    /* モバイル版のデザイン調整 (画面幅768px以下) */
     @media (max-width: 768px) {
         section[data-testid="stSidebar"] {
             width: 75vw !important;
             min-width: 75vw !important;
         }
         div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
-            font-size: 26px !important; 
+            font-size: 24px !important; 
             font-weight: bold !important;
             padding: 25px 10px !important; 
             margin-bottom: 20px !important; 
@@ -58,26 +57,27 @@ st.markdown("""
         }
     }
 
-    /* 4. ログアウトボタン */
+    /* ログアウトボタン：赤色巨大 */
     div.stButton > button[key="logout_btn"] {
         background-color: #ff4b4b !important;
         color: white !important;
-        height: 4em !important;
+        height: 4.5em !important;
         font-size: 20px !important;
         font-weight: bold !important;
     }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. ログイン永続化・自動復旧ロジック ---
+# --- 3. セッション管理 & 永続ログイン復元 ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'staff_info' not in st.session_state: st.session_state.staff_info = None
 
-# ブラウザの記憶を取得
+# ブラウザの記憶を取得（バックグラウンドで実行）
+# ここで st.stop() を使わないのがPCでのフリーズを防ぐポイントです
 saved_id = streamlit_js_eval(js_expressions='localStorage.getItem("staff_id")', key='L_ID')
 saved_key = streamlit_js_eval(js_expressions='localStorage.getItem("session_key")', key='L_KEY')
 
-# 自動ログイン復旧
+# 自動ログイン復旧処理
 if not st.session_state.logged_in and saved_id and saved_key and saved_id != "null":
     try:
         res = supabase.table("staff").select("*").eq("staff_id", saved_id).eq("session_key", saved_key).execute()
@@ -89,36 +89,33 @@ if not st.session_state.logged_in and saved_id and saved_key and saved_id != "nu
 
 # --- A. ログイン画面 ---
 if not st.session_state.logged_in:
-    # 同期待ちの間だけメッセージを表示（saved_idが取得できたらこのif文ごと消滅する）
+    # 同期中メッセージは小さく表示するだけ（画面を止めない）
     if saved_id is None:
-        st.caption("🔄 認証情報を同期中...")
-        st_autorefresh(interval=1000, limit=3, key="init_ref")
-        st.stop()
+        st.caption("🔄 同期中...")
 
-    # ログイン画面本体
     st.markdown("<h2 style='text-align: center; color: #31333F;'>🛡️ 業務管理 ログイン</h2>", unsafe_allow_html=True)
     
     with st.form("login_form"):
-        u_id = st.text_input("スタッフID", placeholder="IDを入力")
-        u_pw = st.text_input("パスワード", type="password", placeholder="PASSを入力")
-        submitted = st.form_submit_button("ログイン開始", use_container_width=True)
+        u_id = st.text_input("スタッフID", placeholder="スタッフ番号")
+        u_pw = st.text_input("パスワード", type="password", placeholder="パスワード")
+        submitted = st.form_submit_button("ログイン", use_container_width=True)
         
         if submitted:
             res = supabase.table("staff").select("*").eq("staff_id", u_id).eq("password", u_pw).execute()
             if res.data:
                 new_key = str(uuid.uuid4())
                 supabase.table("staff").update({"session_key": new_key}).eq("staff_id", u_id).execute()
-                # LocalStorageへ書き込み
+                # ブラウザに保存
                 streamlit_js_eval(js_expressions=f'localStorage.setItem("staff_id", "{u_id}")')
                 streamlit_js_eval(js_expressions=f'localStorage.setItem("session_key", "{new_key}")')
                 st.session_state.logged_in = True
                 st.session_state.staff_info = res.data[0]
                 st.rerun()
             else:
-                st.error("スタッフIDまたはパスワードが違います")
+                st.error("スタッフIDまたはパスワードが正しくありません")
     st.stop()
 
-# --- 4. 共通データ取得（ログイン成功後のみ実行） ---
+# --- 4. 共通データ取得（ログイン後） ---
 staff = st.session_state.staff_info
 now_utc = datetime.datetime.now(datetime.timezone.utc)
 now_jst = now_utc + datetime.timedelta(hours=9)
@@ -139,6 +136,7 @@ logs_res = supabase.table("task_logs").select("*, task_master(*, locations(*))")
 l_data = sorted(logs_res.data, key=lambda x: (x['task_master']['target_hour'] or 0, x['task_master']['target_minute'] or 0))
 active_task = next((l for l in l_data if l['status'] == "in_progress" and l['staff_id'] == staff['id']), None)
 
+# 自動更新
 if not active_task: st_autorefresh(interval=30000, key="global_ref")
 
 def decode_qr(image):
@@ -151,14 +149,14 @@ def decode_qr(image):
 
 def render_task_execution(task):
     st.markdown(f"## 📍 {task['task_master']['locations']['name']}")
-    st.info(f"指示: {task['task_master']['task_name']}")
-    if st.button("⏸️ 中断してリストに戻る", use_container_width=True):
+    st.info(f"内容: {task['task_master']['task_name']}")
+    if st.button("⏸️ 中断して戻る", use_container_width=True):
         supabase.table("task_logs").update({"status": "interrupted"}).eq("id", task['id']).execute(); st.rerun()
     st.divider()
     qr_v_key = f"qr_v_{task['id']}"
     if qr_v_key not in st.session_state: st.session_state[qr_v_key] = False
     if not st.session_state[qr_v_key]:
-        st.subheader("1. 現場QRを撮影")
+        st.subheader("1. 現場QRスキャン")
         qr_in = st.camera_input("QR撮影", key=f"qr_{task['id']}")
         if qr_in and decode_qr(qr_in) == task['task_master']['locations']['qr_token']:
             st.session_state[qr_v_key] = True; st.rerun()
@@ -171,7 +169,7 @@ def render_task_execution(task):
             supabase.table("task_logs").update({"status":"completed","completed_at":now_jst.isoformat(),"photo_url":f_p}).eq("id",task['id']).execute()
             del st.session_state[qr_v_key]; st.balloons(); st.rerun()
 
-# --- B. サイドバー ---
+# --- B. ナビゲーション ---
 width = streamlit_js_eval(js_expressions='window.innerWidth', key='W_WIDTH', want_output=True)
 is_mobile = width is not None and width < 768
 if is_mobile and active_task and not on_break: render_task_execution(active_task); st.stop()
@@ -179,7 +177,7 @@ if is_mobile and active_task and not on_break: render_task_execution(active_task
 st.sidebar.title("🏪 店舗管理")
 st.sidebar.write(f"👤 **{staff['name']}** 様")
 menu_options = ["📋 本日の業務", "🕒 履歴", "📊 監視(Admin)", "📅 出勤簿(Admin)"]
-choice = st.sidebar.radio("機能を選択", [m for m in menu_options if "Admin" not in m or staff['role'] == 'admin'], key="nav_radio")
+choice = st.sidebar.radio("メニュー", [m for m in menu_options if "Admin" not in m or staff['role'] == 'admin'], key="nav_radio")
 
 for _ in range(8): st.sidebar.write("")
 st.sidebar.divider()
@@ -187,10 +185,10 @@ if st.sidebar.button("🚪 ログアウト", use_container_width=True, key="logo
     supabase.table("staff").update({"session_key": None}).eq("id", staff['id']).execute()
     streamlit_js_eval(js_expressions='localStorage.clear()'); st.session_state.logged_in = False; st.rerun()
 
-# --- C. メイン画面表示 ---
+# --- C. コンテンツ表示 ---
 if choice == "📋 本日の業務":
     st.title("📋 本日の業務管理")
-    st.info(f"🕒 日本時刻: {now_jst.strftime('%H:%M')}")
+    st.info(f"🕒 現在時刻: {now_jst.strftime('%H:%M')}")
     st.divider()
     c1, c2, c3 = st.columns(3)
     if not curr_card:
