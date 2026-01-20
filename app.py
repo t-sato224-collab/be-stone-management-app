@@ -11,157 +11,126 @@ from streamlit_autorefresh import st_autorefresh
 import os
 
 # --- 1. システム設定 ---
-url = st.secrets["SUPABASE_URL"]
-key = st.secrets["SUPABASE_KEY"]
-supabase = create_client(url, key)
-JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+try:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    supabase = create_client(url, key)
+except Exception as e:
+    st.error("システム設定（Secrets）が読み込めません。設定を確認してください。")
+    st.stop()
 
+JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 st.set_page_config(page_title="BE STONE Pro", layout="wide", initial_sidebar_state="auto")
 
-# --- 2. 究極の視認性改善CSS（メニュー文字色を完全な黒に強制） ---
+# --- 2. デザインCSS（視認性・文字色・レイアウト） ---
 st.markdown("""
     <style>
-    /* 全体背景 */
     .stApp { background-color: #F8F9FA !important; color: #2D3748 !important; }
-
-    /* 1. モバイルサイドバー設定 */
     @media (max-width: 768px) {
-        section[data-testid="stSidebar"] {
-            width: 75vw !important;
-            min-width: 75vw !important;
-            background-color: #FFFFFF !important;
-        }
-        
-        /* 【最重要】メニュー項目のテキストをあらゆる階層で「漆黒」にする */
+        section[data-testid="stSidebar"] { width: 75vw !important; min-width: 75vw !important; background-color: #FFFFFF !important; }
+        /* メニュー文字色を絶対的に「漆黒」にする */
         div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label,
         div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p,
-        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label span,
-        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label div {
-            color: #000000 !important; /* 完全な黒 */
-            font-size: 26px !important; 
-            font-weight: 900 !important;
-            opacity: 1 !important;
-            -webkit-text-fill-color: #000000 !important; /* iPhone等のSafari対策 */
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label span {
+            color: #000000 !important; font-size: 24px !important; font-weight: 900 !important;
+            -webkit-text-fill-color: #000000 !important; opacity: 1 !important;
         }
-
-        /* 項目間の余白（35px）と区切り線 */
         div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
-            padding-top: 35px !important; 
-            padding-bottom: 35px !important; 
-            border-bottom: 2px solid #EDF2F7 !important;
-            margin-bottom: 0px !important;
-            display: block !important;
+            padding-top: 30px !important; padding-bottom: 30px !important; border-bottom: 2px solid #EDF2F7 !important;
         }
     }
-
-    /* 2. PC版：中央寄せレイアウト */
     @media (min-width: 769px) {
-        .main .block-container {
-            max-width: 850px !important;
-            margin: auto !important;
-            padding-top: 5vh !important;
-        }
+        .main .block-container { max-width: 850px !important; margin: auto !important; padding-top: 5vh !important; }
     }
-
-    /* 3. ボタン：ブランドカラー (#75C9D7) / 白文字固定 */
     div.stButton > button, [data-testid="stCameraInput"] button {
-        background-color: #75C9D7 !important; 
-        color: #FFFFFF !important;
-        border: none !important;
-        border-radius: 15px !important;
-        height: 3.5em !important;
-        font-weight: bold !important;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important;
-        opacity: 1 !important;
+        background-color: #75C9D7 !important; color: #FFFFFF !important; border: none !important;
+        border-radius: 15px !important; height: 3.5em !important; font-weight: bold !important;
+        box-shadow: none !important; opacity: 1 !important;
     }
     div.stButton > button * { color: #FFFFFF !important; }
-
-    /* カードデザイン */
-    .app-card {
-        background-color: #FFFFFF;
-        padding: 25px;
-        border-radius: 20px;
-        box-shadow: 0 10px 25px rgba(0,0,0,0.03);
-        border: 1px solid #EDF2F7;
-        margin-bottom: 20px;
-    }
-
-    /* 不要パーツ隠蔽 */
+    div.stButton > button[key="logout_btn"] { background-color: #FC8181 !important; }
+    .app-card { background-color: #FFFFFF; padding: 25px; border-radius: 20px; box-shadow: 0 10px 25px rgba(0,0,0,0.03); border: 1px solid #EDF2F7; margin-bottom: 20px; }
     div[data-testid="stSidebarNav"] { display: none !important; }
     footer { visibility: hidden !important; }
-    #MainMenu { visibility: hidden !important; }
     header { visibility: visible !important; background: transparent !important; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. ログイン永続化・自動復旧ロジック ---
+# --- 3. ログイン持続・復旧ロジック ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'staff_info' not in st.session_state: st.session_state.staff_info = None
 
+# LocalStorage取得
 saved_id = streamlit_js_eval(js_expressions='localStorage.getItem("staff_id")', key='L_ID')
 saved_key = streamlit_js_eval(js_expressions='localStorage.getItem("session_key")', key='L_KEY')
 
-if not st.session_state.logged_in and saved_id and saved_key and saved_id != "null":
-    try:
-        res = supabase.table("staff").select("*").eq("staff_id", saved_id).eq("session_key", saved_key).execute()
-        if res.data:
-            st.session_state.logged_in = True
-            st.session_state.staff_info = res.data[0]
-            st.rerun()
-    except: pass
+# 自動ログイン復旧
+if not st.session_state.logged_in and saved_id and saved_key:
+    if saved_id not in [None, "null", "undefined"] and saved_key not in [None, "null", "undefined"]:
+        try:
+            res = supabase.table("staff").select("*").eq("staff_id", saved_id).eq("session_key", saved_key).execute()
+            if res.data:
+                st.session_state.logged_in = True
+                st.session_state.staff_info = res.data[0]
+                st.rerun()
+        except: pass
 
 # --- A. ログイン画面 ---
 if not st.session_state.logged_in:
-    if saved_id is None:
-        st_autorefresh(interval=1000, limit=3, key="sync_init")
+    if saved_id is None: # 通信待ち
+        st_autorefresh(interval=1500, limit=3, key="sync_init")
         st.stop()
 
     c_l, c_m, c_r = st.columns([1, 2, 1])
     with c_m:
-        if os.path.exists("logo.png"):
-            st.image("logo.png", use_container_width=True)
-        st.markdown("<h1 style='text-align: center; color: #75C9D7; font-size: 36px; margin-bottom: 0;'>BE STONE</h1>", unsafe_allow_html=True)
-        st.markdown("<p style='text-align: center; color: #A0AEC0; letter-spacing: 4px; font-size: 12px; margin-bottom: 30px;'>OPERATION MANAGEMENT</p>", unsafe_allow_html=True)
-        
+        if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
+        st.markdown("<h1 style='text-align: center; color: #75C9D7;'>BE STONE</h1>", unsafe_allow_html=True)
         with st.form("login_form"):
-            u_id = st.text_input("STAFF ID", placeholder="ID")
-            u_pw = st.text_input("PASSWORD", type="password", placeholder="PASS")
+            u_id = st.text_input("STAFF ID")
+            u_pw = st.text_input("PASSWORD", type="password")
             if st.form_submit_button("SYSTEM LOGIN", use_container_width=True):
-                res = supabase.table("staff").select("*").eq("staff_id", u_id).eq("password", u_pw).execute()
-                if res.data:
-                    new_key = str(uuid.uuid4())
-                    supabase.table("staff").update({"session_key": new_key}).eq("staff_id", u_id).execute()
-                    streamlit_js_eval(js_expressions=f'localStorage.setItem("staff_id", "{u_id}")')
-                    streamlit_js_eval(js_expressions=f'localStorage.setItem("session_key", "{new_key}")')
-                    st.session_state.logged_in = True
-                    st.session_state.staff_info = res.data[0]
-                    st.rerun()
-                else: st.error("ID / PASSWORD MISMATCH")
+                try:
+                    res = supabase.table("staff").select("*").eq("staff_id", u_id).eq("password", u_pw).execute()
+                    if res.data:
+                        new_k = str(uuid.uuid4())
+                        supabase.table("staff").update({"session_key": new_k}).eq("staff_id", u_id).execute()
+                        streamlit_js_eval(js_expressions=f'localStorage.setItem("staff_id", "{u_id}")')
+                        streamlit_js_eval(js_expressions=f'localStorage.setItem("session_key", "{new_k}")')
+                        st.session_state.logged_in = True
+                        st.session_state.staff_info = res.data[0]
+                        st.rerun()
+                    else: st.error("ID/PW不一致")
+                except: st.error("サーバー接続エラー")
     st.stop()
 
-# --- 4. 共通データ同期（ログイン成功後） ---
+# --- 4. 共通データ同期 ---
 staff = st.session_state.staff_info
 now_utc = datetime.datetime.now(datetime.timezone.utc)
 now_jst = now_utc + datetime.timedelta(hours=9)
 today_jst = now_jst.date().isoformat()
 
-# セッション有効チェック
-check_res = supabase.table("staff").select("session_key").eq("id", staff['id']).single().execute()
-if not check_res.data or check_res.data['session_key'] is None:
-    streamlit_js_eval(js_expressions='localStorage.clear()')
-    st.session_state.logged_in = False; st.rerun()
+# セッション有効性チェック
+try:
+    check = supabase.table("staff").select("session_key").eq("id", staff['id']).single().execute()
+    if not check.data or check.data['session_key'] is None:
+        streamlit_js_eval(js_expressions='localStorage.clear()')
+        st.session_state.logged_in = False; st.rerun()
+except: pass
 
-# 同期データ取得
-t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
-curr_card = t_res.data[0] if t_res.data else None
-b_res = supabase.table("breaks").select("*").eq("staff_id", staff['id']).is_("break_end_at", "null").order("break_start_at", desc=True).limit(1).execute()
-on_break = b_res.data[0] if b_res.data else None
-logs_res = supabase.table("task_logs").select("*, task_master(*, locations(*))").eq("work_date", today_jst).execute()
-l_data = sorted(logs_res.data, key=lambda x: (x['task_master']['target_hour'] or 0, x['task_master']['target_minute'] or 0))
-active_task = next((l for l in l_data if l['status'] == "in_progress" and l['staff_id'] == staff['id']), None)
+# 各種データ取得（安全なエラー処理）
+try:
+    t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
+    curr_card = t_res.data[0] if t_res.data else None
+    b_res = supabase.table("breaks").select("*").eq("staff_id", staff['id']).is_("break_end_at", "null").order("break_start_at", desc=True).limit(1).execute()
+    on_break = b_res.data[0] if b_res.data else None
+    logs_res = supabase.table("task_logs").select("*, task_master(*, locations(*))").eq("work_date", today_jst).execute()
+    l_data = sorted(logs_res.data, key=lambda x: (x['task_master']['target_hour'] or 0, x['task_master']['target_minute'] or 0))
+    active_task = next((l for l in l_data if l['status'] == "in_progress" and l['staff_id'] == staff['id']), None)
+except:
+    curr_card, on_break, l_data, active_task = None, None, [], None
 
 if not active_task: st_autorefresh(interval=30000, key="global_ref")
-width = streamlit_js_eval(js_expressions='window.innerWidth', key='WIDTH_CHECK', want_output=True)
+width = streamlit_js_eval(js_expressions='window.innerWidth', key='W_CHECK', want_output=True)
 is_mobile = width is not None and width < 768
 
 def decode_qr(image):
@@ -174,18 +143,16 @@ def decode_qr(image):
 
 def render_task_execution(task):
     st.markdown(f"<div class='app-card'><h2 style='color:#75C9D7; margin:0;'>📍 遂行中: {task['task_master']['locations']['name']}</h2></div>", unsafe_allow_html=True)
-    st.write(f"指示内容: {task['task_master']['task_name']}")
     if st.button("⏸️ 一時中断して戻る", use_container_width=True):
         supabase.table("task_logs").update({"status": "interrupted"}).eq("id", task['id']).execute(); st.rerun()
     st.divider()
-    qr_v_key = f"qr_v_{task['id']}"
-    if qr_v_key not in st.session_state: st.session_state[qr_v_key] = False
-    
-    if not st.session_state[qr_v_key]:
+    v_key = f"qr_v_{task['id']}"
+    if v_key not in st.session_state: st.session_state[v_key] = False
+    if not st.session_state[v_key]:
         st.subheader("1. 現場QRをスキャン")
         qr_in = st.camera_input("QR撮影", key=f"qr_{task['id']}")
         if qr_in and decode_qr(qr_in) == task['task_master']['locations']['qr_token']:
-            st.session_state[qr_v_key] = True; st.rerun()
+            st.session_state[v_key] = True; st.rerun()
     else:
         st.subheader("2. 完了写真撮影")
         ph_in = st.camera_input("完了写真", key=f"ph_{task['id']}")
@@ -193,7 +160,7 @@ def render_task_execution(task):
             f_p = f"{task['id']}.jpg"
             supabase.storage.from_("task-photos").upload(f_p, ph_in.getvalue(), {"upsert":"true"})
             supabase.table("task_logs").update({"status":"completed","completed_at":now_jst.isoformat(),"photo_url":f_p}).eq("id",task['id']).execute()
-            del st.session_state[qr_v_key]; st.balloons(); st.rerun()
+            del st.session_state[v_key]; st.balloons(); st.rerun()
 
 # --- B. サイドバー ---
 if is_mobile and active_task and not on_break:
@@ -203,18 +170,15 @@ with st.sidebar:
     if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
     st.markdown(f"<div style='text-align:center; padding:10px; color:#000000;'><b>{staff['name']} 様</b></div>", unsafe_allow_html=True)
     st.divider()
-    menu_options = ["📋 本日の業務", "🕒 履歴"]
-    if staff['role'] == 'admin': menu_options += ["📊 監視(Admin)", "📅 出勤簿(Admin)"]
-    choice = st.radio("MENU", menu_options, key="nav_radio")
+    choice = st.radio("MENU", ["📋 本日の業務", "🕒 履歴"] + (["📊 監視(Admin)", "📅 出勤簿(Admin)"] if staff['role'] == 'admin' else []), key="nav")
     for _ in range(8): st.write("")
-    st.divider()
     if st.button("🚪 LOGOUT", key="logout_btn", use_container_width=True):
         supabase.table("staff").update({"session_key": None}).eq("id", staff['id']).execute()
         streamlit_js_eval(js_expressions='localStorage.clear()'); st.session_state.logged_in = False; st.rerun()
 
-# --- C. メインエリア表示 ---
-st.markdown(f"<h1 style='color: #75C9D7; margin-bottom: 0;'>BE STONE</h1>", unsafe_allow_html=True)
-st.caption(f"{now_jst.strftime('%Y/%m/%d %H:%M')} | Logged in: {staff['name']}")
+# --- C. コンテンツエリア ---
+st.markdown("<h1 style='color: #75C9D7; margin-bottom: 0;'>BE STONE</h1>", unsafe_allow_html=True)
+st.caption(f"{now_jst.strftime('%H:%M')} | Logged in: {staff['name']}")
 
 if choice == "📋 本日の業務":
     st.markdown("<div class='app-card'>", unsafe_allow_html=True)
@@ -245,22 +209,18 @@ if choice == "📋 本日の業務":
             for l in display_tasks:
                 st.markdown("<div style='border-bottom: 1px solid #EDF2F7; padding: 20px 0;'>", unsafe_allow_html=True)
                 cola, colb = st.columns([3, 1])
-                with cola:
-                    st.markdown(f"**【{l['task_master']['target_hour']:02d}:{l['task_master']['target_minute']:02d}】 {l['task_master']['locations']['name']}**")
-                    st.write(l['task_master']['task_name'])
+                cola.write(f"**【{l['task_master']['target_hour']:02d}:{l['task_master']['target_minute']:02d}】 {l['task_master']['locations']['name']}**\n{l['task_master']['task_name']}")
                 with colb:
                     if l['status'] == "pending":
                         if st.button("着手", key=f"s_{l['id']}", use_container_width=True):
-                            supabase.table("task_logs").update({"status":"in_progress","staff_id":staff['id']}).eq("id",l['id']).execute()
-                            st.session_state[f"qr_v_{l['id']}"] = False; st.rerun()
+                            supabase.table("task_logs").update({"status":"in_progress","staff_id":staff['id']}).eq("id",l['id']).execute(); st.session_state[f"qr_v_{l['id']}"] = False; st.rerun()
                     elif l['status'] == "interrupted":
                         if st.button("再開", key=f"r_{l['id']}", type="primary", use_container_width=True):
-                            supabase.table("task_logs").update({"status":"in_progress","staff_id":staff['id']}).eq("id",l['id']).execute()
-                            st.session_state[f"qr_v_{l['id']}"] = False; st.rerun()
+                            supabase.table("task_logs").update({"status":"in_progress","staff_id":staff['id']}).eq("id",l['id']).execute(); st.session_state[f"qr_v_{l['id']}"] = False; st.rerun()
                     elif l['status'] == "in_progress": st.warning("Busy")
                     else: st.success("OK")
                 st.markdown("</div>", unsafe_allow_html=True)
-            st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
 
 elif choice == "🕒 履歴":
     st.markdown("<div class='app-card'>", unsafe_allow_html=True)
