@@ -1,4 +1,5 @@
 import streamlit as st
+import os
 from supabase import create_client
 import cv2
 import numpy as np
@@ -8,13 +9,21 @@ import pandas as pd
 import uuid
 from streamlit_js_eval import streamlit_js_eval
 from streamlit_autorefresh import st_autorefresh
-import os
+
+# ★ 必ず最初 ★
+st.set_page_config(
+    page_title="BE STONE Pro",
+    page_icon="logo.png",
+    layout="wide",
+    initial_sidebar_state="auto"
+)
 
 # --- 1. システム設定 ---
 url = st.secrets["SUPABASE_URL"]
 key = st.secrets["SUPABASE_KEY"]
 supabase = create_client(url, key)
 JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+
 
 # アイコンとタイトル設定
 st.set_page_config(
