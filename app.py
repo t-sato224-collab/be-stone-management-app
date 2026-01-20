@@ -18,40 +18,46 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 st.set_page_config(page_title="BE STONE Pro", layout="wide", initial_sidebar_state="auto")
 
-# --- 2. 究極のデザインCSS（BE STONE ブランドカラー & モバイル最適化） ---
+# --- 2. 究極のブランド・デザイン（CSS） ---
 st.markdown("""
     <style>
-    /* 全体背景 */
+    /* 全体背景：清潔感のあるオフホワイト */
     .stApp { background-color: #F8F9FA !important; color: #2D3748 !important; }
 
-    /* 1. モバイルサイドバー横幅 75%横幅 & メニュー巨大化 & 文字色黒 */
+    /* 1. モバイルサイドバー：横幅75%、フォント26px、間隔35px、文字色 黒 */
     @media (max-width: 768px) {
         section[data-testid="stSidebar"] {
             width: 75vw !important;
             min-width: 75vw !important;
             background-color: #FFFFFF !important;
         }
-        /* メニュー項目のフォント 26px / 文字色を「漆黒」へ変更 */
+        /* メニュー項目のフォント・色・間隔を強制指定 */
         div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
             font-size: 26px !important; 
-            font-weight: 800 !important;
+            font-weight: 900 !important;
+            color: #000000 !important; /* 背景に同化しない純黒 */
             padding-top: 35px !important; 
             padding-bottom: 35px !important; 
-            border-bottom: 1px solid #EDF2F7 !important;
-            color: #000000 !important; /* 修正点：背景と同化しないよう真っ黒に固定 */
+            margin-bottom: 0px !important;
+            border-bottom: 2px solid #EDF2F7 !important;
+            display: block !important;
+        }
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p {
+            color: #000000 !important;
+            font-size: 26px !important;
         }
     }
 
-    /* 2. 【PC】中央寄せカードレイアウト */
+    /* 2. PC版：中央寄せレイアウト */
     @media (min-width: 769px) {
         .main .block-container {
-            max-width: 800px !important;
+            max-width: 850px !important;
             margin: auto !important;
             padding-top: 5vh !important;
         }
     }
 
-    /* 3. 【ボタン】黒靄の完全消去 ＆ ブランドカラー（ターコイズ） */
+    /* 3. ボタン：ターコイズブルー (#75C9D7) / 白文字固定 */
     div.stButton > button, [data-testid="stCameraInput"] button {
         background-color: #75C9D7 !important; 
         color: #FFFFFF !important;
@@ -60,20 +66,11 @@ st.markdown("""
         height: 3.5em !important;
         font-weight: bold !important;
         box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important;
-        text-shadow: none !important;
         opacity: 1 !important;
-        transition: transform 0.1s !important;
     }
-    div.stButton > button:active { transform: scale(0.98); }
     div.stButton > button * { color: #FFFFFF !important; }
 
-    /* 4. ログアウトボタン（赤） */
-    div.stButton > button[key="logout_btn"] {
-        background-color: #FC8181 !important;
-        height: 4.5em !important;
-    }
-
-    /* 5. カードデザイン */
+    /* カードデザイン */
     .app-card {
         background-color: #FFFFFF;
         padding: 25px;
@@ -83,9 +80,11 @@ st.markdown("""
         margin-bottom: 20px;
     }
 
-    /* 6. 不要パーツ隠蔽 */
+    /* 不要パーツ隠蔽 */
     div[data-testid="stSidebarNav"] { display: none !important; }
     footer { visibility: hidden !important; }
+    #MainMenu { visibility: hidden !important; }
+    header { visibility: visible !important; background: transparent !important; }
     </style>
     """, unsafe_allow_html=True)
 
@@ -97,7 +96,7 @@ if 'staff_info' not in st.session_state: st.session_state.staff_info = None
 saved_id = streamlit_js_eval(js_expressions='localStorage.getItem("staff_id")', key='L_ID')
 saved_key = streamlit_js_eval(js_expressions='localStorage.getItem("session_key")', key='L_KEY')
 
-# 自動復旧チェック
+# 自動復旧（ログイン画面が表示されている間にバックグラウンドで動作）
 if not st.session_state.logged_in and saved_id and saved_key and saved_id != "null":
     try:
         res = supabase.table("staff").select("*").eq("staff_id", saved_id).eq("session_key", saved_key).execute()
@@ -107,27 +106,19 @@ if not st.session_state.logged_in and saved_id and saved_key and saved_id != "nu
             st.rerun()
     except: pass
 
-# --- A. ログイン画面 ---
+# --- A. ログイン画面（PCフリーズを避けるため、何があってもこの画面を出す） ---
 if not st.session_state.logged_in:
-    # 同期待ちの表示を削除（修正点：System Syncingの表記を無くしました）
-    if saved_id is None:
-        st_autorefresh(interval=1000, limit=3, key="sync_init")
-        st.stop()
-
-    # センター配置
     c_l, c_m, c_r = st.columns([1, 2, 1])
     with c_m:
         if os.path.exists("logo.png"):
             st.image("logo.png", use_container_width=True)
-        else:
-            st.markdown("<h1 style='text-align: center; color: #75C9D7; font-size: 40px;'>BE STONE</h1>", unsafe_allow_html=True)
-        
-        st.markdown("<p style='text-align: center; color: #A0AEC0; letter-spacing: 4px; font-size: 12px; margin-bottom: 40px;'>OPERATION MANAGEMENT</p>", unsafe_allow_html=True)
+        st.markdown("<h1 style='text-align: center; color: #75C9D7; font-size: 36px; margin-bottom: 0;'>BE STONE</h1>", unsafe_allow_html=True)
+        st.markdown("<p style='text-align: center; color: #A0AEC0; letter-spacing: 4px; font-size: 12px; margin-bottom: 30px;'>OPERATION MANAGEMENT</p>", unsafe_allow_html=True)
         
         with st.form("login_form"):
             u_id = st.text_input("STAFF ID", placeholder="スタッフIDを入力")
             u_pw = st.text_input("PASSWORD", type="password", placeholder="パスワードを入力")
-            if st.form_submit_button("LOGIN TO SYSTEM", use_container_width=True):
+            if st.form_submit_button("SYSTEM LOGIN", use_container_width=True):
                 res = supabase.table("staff").select("*").eq("staff_id", u_id).eq("password", u_pw).execute()
                 if res.data:
                     new_key = str(uuid.uuid4())
@@ -146,13 +137,13 @@ now_utc = datetime.datetime.now(datetime.timezone.utc)
 now_jst = now_utc + datetime.timedelta(hours=9)
 today_jst = now_jst.date().isoformat()
 
-# グローバルログアウトチェック
+# セッション有効チェック
 check_res = supabase.table("staff").select("session_key").eq("id", staff['id']).single().execute()
 if not check_res.data or check_res.data['session_key'] is None:
     streamlit_js_eval(js_expressions='localStorage.clear()')
     st.session_state.logged_in = False; st.rerun()
 
-# 同期データ取得
+# 同期データ
 t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
 curr_card = t_res.data[0] if t_res.data else None
 b_res = supabase.table("breaks").select("*").eq("staff_id", staff['id']).is_("break_end_at", "null").order("break_start_at", desc=True).limit(1).execute()
@@ -162,7 +153,6 @@ l_data = sorted(logs_res.data, key=lambda x: (x['task_master']['target_hour'] or
 active_task = next((l for l in l_data if l['status'] == "in_progress" and l['staff_id'] == staff['id']), None)
 
 if not active_task: st_autorefresh(interval=30000, key="global_ref")
-
 width = streamlit_js_eval(js_expressions='window.innerWidth', key='WIDTH_CHECK', want_output=True)
 is_mobile = width is not None and width < 768
 
@@ -176,7 +166,7 @@ def decode_qr(image):
 
 def render_task_execution(task):
     st.markdown(f"<div class='app-card'><h2 style='color:#75C9D7; margin:0;'>📍 遂行中: {task['task_master']['locations']['name']}</h2></div>", unsafe_allow_html=True)
-    st.write(f"業務指示: {task['task_master']['task_name']}")
+    st.write(f"指示内容: {task['task_master']['task_name']}")
     if st.button("⏸️ 一時中断して戻る", use_container_width=True):
         supabase.table("task_logs").update({"status": "interrupted"}).eq("id", task['id']).execute(); st.rerun()
     st.divider()
@@ -184,14 +174,14 @@ def render_task_execution(task):
     if qr_v_key not in st.session_state: st.session_state[qr_v_key] = False
     
     if not st.session_state[qr_v_key]:
-        st.subheader("1. 現場QRスキャン")
-        qr_in = st.camera_input("QR撮影", key=f"qr_{task['id']}")
+        st.subheader("1. 現場QRをスキャン")
+        qr_in = st.camera_input("QRを撮影してください", key=f"qr_{task['id']}")
         if qr_in and decode_qr(qr_in) == task['task_master']['locations']['qr_token']:
             st.session_state[qr_v_key] = True; st.rerun()
     else:
         st.subheader("2. 完了写真撮影")
-        ph_in = st.camera_input("完了写真", key=f"ph_{task['id']}")
-        if ph_in and st.button("✅ 報告を送信", type="primary", use_container_width=True):
+        ph_in = st.camera_input("完了写真を撮影してください", key=f"ph_{task['id']}")
+        if ph_in and st.button("✅ 報告を送信して完了", type="primary", use_container_width=True):
             f_p = f"{task['id']}.jpg"
             supabase.storage.from_("task-photos").upload(f_p, ph_in.getvalue(), {"upsert":"true"})
             supabase.table("task_logs").update({"status":"completed","completed_at":now_jst.isoformat(),"photo_url":f_p}).eq("id",task['id']).execute()
@@ -203,19 +193,18 @@ if is_mobile and active_task and not on_break:
 
 with st.sidebar:
     if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
-    st.markdown(f"<div style='text-align:center; padding:10px;'><b>{staff['name']} 様</b></div>", unsafe_allow_html=True)
+    st.markdown(f"<div style='text-align:center; padding:10px; color:#000000;'><b>{staff['name']} 様</b></div>", unsafe_allow_html=True)
     st.divider()
     menu_options = ["📋 本日の業務", "🕒 履歴"]
     if staff['role'] == 'admin': menu_options += ["📊 監視(Admin)", "📅 出勤簿(Admin)"]
     choice = st.radio("MENU", menu_options, key="nav_radio")
-    
     for _ in range(8): st.write("")
     st.divider()
-    if st.button("🚪 LOGOUT", use_container_width=True, key="logout_btn"):
+    if st.button("🚪 LOGOUT", key="logout_btn", use_container_width=True):
         supabase.table("staff").update({"session_key": None}).eq("id", staff['id']).execute()
         streamlit_js_eval(js_expressions='localStorage.clear()'); st.session_state.logged_in = False; st.rerun()
 
-# --- C. コンテンツエリア ---
+# --- C. メインエリア表示 ---
 st.markdown(f"<h1 style='color: #75C9D7; margin-bottom: 0;'>BE STONE</h1>", unsafe_allow_html=True)
 st.caption(f"{now_jst.strftime('%Y/%m/%d %H:%M')} | Logged in: {staff['name']}")
 
