@@ -3,4 +3,5 @@ supabase
 opencv-python-headless
 pillow
 numpy
+pandas
 streamlit-js-eval
