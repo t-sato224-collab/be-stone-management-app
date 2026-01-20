@@ -18,32 +18,39 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 st.set_page_config(page_title="BE STONE Pro", layout="wide", initial_sidebar_state="auto")
 
-# --- 2. 究極のデザインCSS（メニュー文字色を漆黒に強制固定） ---
+# --- 2. 究極の視認性改善CSS（メニュー文字色を完全な黒に強制） ---
 st.markdown("""
     <style>
     /* 全体背景 */
     .stApp { background-color: #F8F9FA !important; color: #2D3748 !important; }
 
-    /* 1. モバイルサイドバー設定（横幅75% / フォント26px / 間隔35px / 文字色：漆黒） */
+    /* 1. モバイルサイドバー設定 */
     @media (max-width: 768px) {
         section[data-testid="stSidebar"] {
             width: 75vw !important;
             min-width: 75vw !important;
             background-color: #FFFFFF !important;
         }
-        /* メニュー項目のテキストカラーを「漆黒」に強制固定 */
-        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p {
-            color: #000000 !important; 
+        
+        /* 【最重要】メニュー項目のテキストをあらゆる階層で「漆黒」にする */
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label,
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p,
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label span,
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label div {
+            color: #000000 !important; /* 完全な黒 */
             font-size: 26px !important; 
             font-weight: 900 !important;
-            line-height: 1.2 !important;
+            opacity: 1 !important;
+            -webkit-text-fill-color: #000000 !important; /* iPhone等のSafari対策 */
         }
-        /* 項目間の余白（35px相当の調整） */
+
+        /* 項目間の余白（35px）と区切り線 */
         div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
             padding-top: 35px !important; 
             padding-bottom: 35px !important; 
-            border-bottom: 1px solid #EDF2F7 !important;
+            border-bottom: 2px solid #EDF2F7 !important;
             margin-bottom: 0px !important;
+            display: block !important;
         }
     }
 
@@ -56,7 +63,7 @@ st.markdown("""
         }
     }
 
-    /* 3. ボタン：ターコイズブルー / 白文字固定 / 黒靄除去 */
+    /* 3. ボタン：ブランドカラー (#75C9D7) / 白文字固定 */
     div.stButton > button, [data-testid="stCameraInput"] button {
         background-color: #75C9D7 !important; 
         color: #FFFFFF !important;
@@ -64,7 +71,7 @@ st.markdown("""
         border-radius: 15px !important;
         height: 3.5em !important;
         font-weight: bold !important;
-        box-shadow: none !important;
+        box-shadow: 0 4px 6px rgba(0,0,0,0.05) !important;
         opacity: 1 !important;
     }
     div.stButton > button * { color: #FFFFFF !important; }
@@ -87,7 +94,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 3. ログイン持続・復旧ロジック ---
+# --- 3. ログイン永続化・自動復旧ロジック ---
 if 'logged_in' not in st.session_state: st.session_state.logged_in = False
 if 'staff_info' not in st.session_state: st.session_state.staff_info = None
 
@@ -105,6 +112,10 @@ if not st.session_state.logged_in and saved_id and saved_key and saved_id != "nu
 
 # --- A. ログイン画面 ---
 if not st.session_state.logged_in:
+    if saved_id is None:
+        st_autorefresh(interval=1000, limit=3, key="sync_init")
+        st.stop()
+
     c_l, c_m, c_r = st.columns([1, 2, 1])
     with c_m:
         if os.path.exists("logo.png"):
@@ -177,7 +188,7 @@ def render_task_execution(task):
             st.session_state[qr_v_key] = True; st.rerun()
     else:
         st.subheader("2. 完了写真撮影")
-        ph_in = st.camera_input("完了写真を撮影", key=f"ph_{task['id']}")
+        ph_in = st.camera_input("完了写真", key=f"ph_{task['id']}")
         if ph_in and st.button("✅ 報告を送信", type="primary", use_container_width=True):
             f_p = f"{task['id']}.jpg"
             supabase.storage.from_("task-photos").upload(f_p, ph_in.getvalue(), {"upsert":"true"})
@@ -194,16 +205,16 @@ with st.sidebar:
     st.divider()
     menu_options = ["📋 本日の業務", "🕒 履歴"]
     if staff['role'] == 'admin': menu_options += ["📊 監視(Admin)", "📅 出勤簿(Admin)"]
-    choice = st.sidebar.radio("MENU", menu_options, key="nav_radio")
+    choice = st.radio("MENU", menu_options, key="nav_radio")
     for _ in range(8): st.write("")
     st.divider()
-    if st.sidebar.button("🚪 ログアウト", key="logout_btn", use_container_width=True):
+    if st.button("🚪 LOGOUT", key="logout_btn", use_container_width=True):
         supabase.table("staff").update({"session_key": None}).eq("id", staff['id']).execute()
         streamlit_js_eval(js_expressions='localStorage.clear()'); st.session_state.logged_in = False; st.rerun()
 
 # --- C. メインエリア表示 ---
 st.markdown(f"<h1 style='color: #75C9D7; margin-bottom: 0;'>BE STONE</h1>", unsafe_allow_html=True)
-st.caption(f"{now_jst.strftime('%H:%M')} / {staff['name']}")
+st.caption(f"{now_jst.strftime('%Y/%m/%d %H:%M')} | Logged in: {staff['name']}")
 
 if choice == "📋 本日の業務":
     st.markdown("<div class='app-card'>", unsafe_allow_html=True)
@@ -229,7 +240,7 @@ if choice == "📋 本日の業務":
         st.markdown("<div class='app-card'>", unsafe_allow_html=True)
         st.subheader(f"📋 TASKS ({now_jst.hour:02d}時台)")
         display_tasks = [l for l in l_data if l['task_master']['target_hour'] == now_jst.hour]
-        if not display_tasks: st.write("予定なし")
+        if not display_tasks: st.write("No scheduled tasks.")
         else:
             for l in display_tasks:
                 st.markdown("<div style='border-bottom: 1px solid #EDF2F7; padding: 20px 0;'>", unsafe_allow_html=True)
