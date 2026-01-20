@@ -14,19 +14,21 @@ JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
 
 st.set_page_config(page_title="天然薬石管理システム Pro", layout="wide")
 
-# --- 2. CSSによるUI調整（ログアウトボタンを最下部に固定） ---
+# --- 2. CSSによるUI調整（誤操作防止：ログアウトボタンを最下部へ隔離） ---
 st.markdown("""
     <style>
-    /* サイドバーのログアウトエリアを強調し、余白を強制的に作る */
-    .stButton > button[kind="primary"] {
+    /* ログアウトボタンを赤色にし、視認性を変える */
+    div.stButton > button:first-child[key="logout_btn"] {
         background-color: #ff4b4b;
         color: white;
+        border-radius: 10px;
     }
+    /* サイドバーの標準ナビゲーションを隠す */
     div[data-testid="stSidebarNav"] {
         display: none;
     }
     </style>
-    """, unsafe_allow_stdio=True)
+    """, unsafe_allow_html=True) # 修正済み: unsafe_allow_html
 
 # --- 3. 日本時間の計算 ---
 now_jst = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
@@ -68,7 +70,7 @@ if not st.session_state.logged_in:
 staff = st.session_state.staff_info
 st.sidebar.title("🏪 管理メニュー")
 
-# 1. ユーザー情報と設定
+# 1. ユーザー情報
 st.sidebar.write(f"👤 **{staff['name']}** 様")
 with st.sidebar.expander("🔑 パスワード変更"):
     with st.form("pw_change"):
@@ -89,16 +91,15 @@ if staff['role'] == 'admin':
 
 choice = st.sidebar.radio("機能を切り替え", menu_options)
 
-# 3. 極端な空白の挿入（30行分の空白を作り、ボタンを画面外近くまで押し下げる）
-for _ in range(30):
+# 3. 極端な空白の挿入（メニューとログアウトを物理的に完全に切り離す）
+for _ in range(35): # さらに余白を増やしました
     st.sidebar.write("")
 
 st.sidebar.divider()
 
 # 4. ログアウトボタン（最下部へ隔離）
-# 誤操作防止のため「確認用チェックボックス」を挟む二段構えにします
-st.sidebar.warning("⚠️ アカウント操作")
-if st.sidebar.button("🚪 システムをログアウト", use_container_width=True, help="ログアウトします"):
+st.sidebar.warning("⚠️ 退出操作")
+if st.sidebar.button("🚪 システムをログアウト", use_container_width=True, key="logout_btn"):
     st.session_state.logged_in = False
     st.rerun()
 
@@ -123,20 +124,21 @@ if choice == "📋 本日の業務":
     else:
         st.success(f"出勤中: {curr_card['clock_in_at'][11:16]}")
         if not on_break:
-            if c2.button("☕ 休憩入り", use_container_width=True):
+            if c2.button("☕ 休憩入り", use_container_width=True, key="break_start"):
                 supabase.table("breaks").insert({"staff_id":staff['id'], "timecard_id":curr_card['id'], "break_start_at":now_jst.isoformat(), "work_date":today_jst}).execute()
                 st.rerun()
-            if c3.button("🏁 退勤打刻", use_container_width=True, type="primary"):
+            if c3.button("🏁 退勤打刻", use_container_width=True, type="primary", key="clock_out"):
                 supabase.table("timecards").update({"clock_out_at":now_jst.isoformat()}).eq("id", curr_card['id']).execute()
                 st.rerun()
         else:
             st.warning(f"休憩中 ({on_break['break_start_at'][11:16]}〜)")
-            if c2.button("🏃 業務戻り", use_container_width=True, type="primary"):
+            if c2.button("🏃 業務戻り", use_container_width=True, type="primary", key="break_end"):
                 supabase.table("breaks").update({"break_end_at":now_jst.isoformat()}).eq("id", on_break['id']).execute()
                 st.rerun()
 
     # タスク管理
-    if on_break: st.warning("休憩を終了してください")
+    if on_break: 
+        st.warning("現在休憩中です。休憩終了後にタスクが表示されます。")
     elif curr_card and not curr_card['clock_out_at']:
         # 今日のログ生成
         tm_res = supabase.table("task_master").select("*").execute()
