@@ -123,19 +123,10 @@ now_jst = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hour
 today_jst = now_jst.date().isoformat()
 
 # セッション有効チェック
-# --- セッション検証（自動ログイン確定後のみ） ---
-if st.session_state.logged_in and staff:
-    check_res = supabase.table("staff") \
-        .select("session_key") \
-        .eq("staff_id", staff['staff_id']) \
-        .single() \
-        .execute()
-
-    if not check_res.data or check_res.data['session_key'] != saved_key:
-        streamlit_js_eval(js_expressions='localStorage.clear()')
-        st.session_state.logged_in = False
-        st.rerun()
-
+check_res = supabase.table("staff").select("session_key").eq("id", staff['id']).single().execute()
+if not check_res.data or check_res.data['session_key'] is None:
+    streamlit_js_eval(js_expressions='localStorage.clear()')
+    st.session_state.logged_in = False; st.rerun()
 
 # 同期データ取得
 t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
