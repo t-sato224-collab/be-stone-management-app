@@ -290,5 +290,61 @@ elif "出勤簿" in choice:
             h, m = divmod(act_m, 60)
             df_l.append({"名前": r['staff_name'], "日付": r['work_date'], "出勤": c_in.strftime("%H:%M"), "退勤": c_out.strftime("%H:%M") if c_out else "未", "休憩(分)": br_m, "実働": f"{h:02d}:{m:02d}", "分": act_m})
         df = pd.DataFrame(df_l)
-        def style_red(row): return ['color: red' if row['分'] >= 420 else '' for _ in row]
-        st.dataframe(df.drop(columns=['分']).style.apply(style_red, axis=1), use_container_width=True)
+        def style_red(row):
+    return ['color: red' if row['分'] >= 420 else '' for _ in row]
+
+# ===== 関数定義は必ず先 =====
+def style_red(row):
+    m = row.get('分', 0) or 0
+    return ['color: red' if m >= 420 else '' for _ in row]
+
+# ===== 出勤簿(Admin) =====
+elif "出勤簿" in choice:
+    st.markdown("<div class='app-card'>", unsafe_allow_html=True)
+
+    all_s = supabase.table("staff").select("id, name").execute()
+    s_dict = {s['name']: s['id'] for s in all_s.data}
+
+    target = st.selectbox("STAFF", ["-- 全員 --"] + list(s_dict.keys()))
+    s_d = st.date_input("START", datetime.date.today()-datetime.timedelta(days=30))
+    e_d = st.date_input("END", datetime.date.today())
+
+    q = supabase.table("timecards").select("*, breaks(*)") \
+        .gte("work_date", s_d.isoformat()) \
+        .lte("work_date", e_d.isoformat())
+
+    if target != "-- 全員 --":
+        q = q.eq("staff_id", s_dict[target])
+
+    data = q.order("work_date", desc=True).execute()
+
+    if data.data:
+        df_l = []
+        for r in data.data:
+            c_in = datetime.datetime.fromisoformat(r['clock_in_at'])
+            c_out = datetime.datetime.fromisoformat(r['clock_out_at']) if r['clock_out_at'] else None
+
+            br_m = sum(
+                int((datetime.datetime.fromisoformat(b['break_end_at'])
+                    - datetime.datetime.fromisoformat(b['break_start_at'])).total_seconds() // 60)
+                for b in r.get('breaks', []) if b['break_end_at']
+            )
+
+            act_m = (int((c_out - c_in).total_seconds() // 60) - br_m) if c_out else 0
+            h, m = divmod(act_m, 60)
+
+            df_l.append({
+                "名前": r['staff_name'],
+                "日付": r['work_date'],
+                "出勤": c_in.strftime("%H:%M"),
+                "退勤": c_out.strftime("%H:%M") if c_out else "未",
+                "休憩(分)": br_m,
+                "実働": f"{h:02d}:{m:02d}",
+                "分": act_m
+            })
+
+        df = pd.DataFrame(df_l)
+
+        styled_df = df.style.apply(style_red, axis=1)
+        st.dataframe(styled_df.drop(columns=['分']), use_container_width=True)
+
