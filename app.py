@@ -1,174 +1,294 @@
 import streamlit as st
 from supabase import create_client
+import cv2
+import numpy as np
+from PIL import Image
+import datetime
 import pandas as pd
-from datetime import datetime, timedelta
+import uuid
+from streamlit_js_eval import streamlit_js_eval
+from streamlit_autorefresh import st_autorefresh
+import os
 
-# --- 1. ページ設定 ---
-st.set_page_config(page_title="NIPPO Pro - 期間抽出対応", page_icon="📑", layout="wide")
-# --- 1. ページ設定 ---
-st.set_page_config(page_title="NIPPO Pro", page_icon="📑", layout="wide")
+# --- 1. システム設定 ---
+try:
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    supabase = create_client(url, key)
+except:
+    st.error("Secrets設定を確認してください。")
+    st.stop()
 
-# --- 追加：アプリの外観をプロ仕様にするCSS ---
+JST = datetime.timezone(datetime.timedelta(hours=9), 'JST')
+APP_TITLE = "BE STONE"
+
+st.set_page_config(
+    page_title=APP_TITLE, 
+    page_icon="logo.png" if os.path.exists("logo.png") else "💎", 
+    layout="wide", 
+    initial_sidebar_state="auto"
+)
+
+# --- 2. 視認性最優先・デザインCSS（漆黒文字・ターコイズ・PC中央） ---
 st.markdown("""
     <style>
-    /* 右上のメニューボタンを隠す */
-    #MainMenu {visibility: hidden;}
-    /* 下のフッター（Made with Streamlit）を隠す */
-    footer {visibility: hidden;}
-    /* ヘッダーの余計な線を消す */
-    header {visibility: hidden;}
-    /* 入力フォームの角を丸くする */
-    .stTextInput>div>div>input {border-radius: 10px;}
+    :root { color-scheme: light !important; }
+    .stApp { background-color: #F8F9FA !important; color: #000000 !important; }
+    
+    /* 上部余白の最小化 */
+    .main .block-container { padding-top: 1.5rem !important; padding-bottom: 0rem !important; }
+    header[data-testid="stHeader"] { background: rgba(0,0,0,0) !important; visibility: visible !important; }
+
+    /* 文字色を「漆黒」に強制固定 */
+    .stMarkdown, p, h1, h2, h3, span, label, li, div { color: #000000 !important; }
+
+    /* モバイルサイドバー設定：横幅75% / 文字色「漆黒」 / デカ文字 */
+    @media (max-width: 768px) {
+        section[data-testid="stSidebar"] { width: 75vw !important; min-width: 75vw !important; background-color: #FFFFFF !important; }
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label p,
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label span {
+            color: #000000 !important; font-size: 24px !important; font-weight: 900 !important;
+            -webkit-text-fill-color: #000000 !important;
+        }
+        div[data-testid="stSidebar"] .stRadio div[role="radiogroup"] label {
+            padding: 30px 10px !important; border-bottom: 2px solid #EDF2F7 !important;
+        }
+    }
+    
+    /* PC版中央寄せ */
+    @media (min-width: 769px) { .main .block-container { max-width: 850px !important; margin: auto !important; } }
+
+    /* ボタン：ターコイズブルー (#75C9D7) */
+    div.stButton > button, [data-testid="stCameraInput"] button {
+        background-color: #75C9D7 !important; color: #FFFFFF !important; border: none !important;
+        border-radius: 12px !important; height: 3.5em !important; font-weight: bold !important;
+        box-shadow: none !important; opacity: 1 !important; transition: none !important;
+    }
+    div.stButton > button * { color: #FFFFFF !important; -webkit-text-fill-color: #FFFFFF !important; }
+    div.stButton > button[key="logout_btn"] { background-color: #FC8181 !important; }
+
+    .app-card {
+        background-color: #FFFFFF !important; padding: 25px; border-radius: 20px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.03); border: 1px solid #EDF2F7; margin-bottom: 20px;
+    }
+    div[data-testid="stSidebarNav"] { display: none !important; }
+    footer { visibility: hidden !important; }
     </style>
     """, unsafe_allow_html=True)
-# --- 2. 接続 ---
-url = st.secrets["supabase"]["url"]
-key = st.secrets["supabase"]["key"]
-supabase = create_client(url, key)
 
-if "user" not in st.session_state:
-    st.session_state.user = None
+# --- 3. ログイン・同期管理（ノンブロッキング） ---
+if 'logged_in' not in st.session_state: st.session_state.logged_in = False
+if 'staff_info' not in st.session_state: st.session_state.staff_info = None
 
-# --- 認証画面 ---
-def auth_screen():
-    st.title("🔐 ログイン")
-    choice = st.radio("メニュー", ["ログイン", "新規登録"], horizontal=True)
-    email = st.text_input("メールアドレス")
-    password = st.text_input("パスワード", type="password")
-    if st.button("実行"):
+# ブラウザ記憶の取得
+saved_id = streamlit_js_eval(js_expressions='localStorage.getItem("staff_id")', key='L_ID')
+saved_key = streamlit_js_eval(js_expressions='localStorage.getItem("session_key")', key='L_KEY')
+
+if not st.session_state.logged_in and saved_id and saved_key:
+    if str(saved_id) != "null":
         try:
-            if choice == "新規登録":
-                supabase.auth.sign_up({"email": email, "password": password})
-                st.success("確認メールを送りました。")
-            else:
-                res = supabase.auth.sign_in_with_password({"email": email, "password": password})
-                st.session_state.user = res.user
-                st.rerun()
-        except Exception as e:
-            st.error(f"エラー: {e}")
-
-# --- メインアプリ ---
-def main_app():
-    user = st.session_state.user
-    st.sidebar.write(f"👤 {user.email}")
-    if st.sidebar.button("ログアウト"):
-        supabase.auth.sign_out()
-        st.session_state.user = None
-        st.rerun()
-
-    tab1, tab2 = st.tabs(["✨ 日報登録", "🔎 閲覧・検索・一括出力"])
-
-    # --- TAB 1: 登録 ---
-    with tab1:
-        with st.form("add"):
-            st.subheader("日報登録")
-            d = st.date_input("日付", value=datetime.now())
-            n = st.text_input("担当者")
-            l = st.text_input("場所")
-            c = st.text_area("内容")
-            if st.form_submit_button("保存"):
-                supabase.table("nippo").insert({"date":str(d),"person":n,"location":l,"content":c,"user_id":user.id}).execute()
-                st.success("保存完了")
-                st.rerun()
-
-    # --- TAB 2: 閲覧・期間抽出・一括編集 ---
-    with tab2:
-        st.subheader("データの抽出と管理")
-        
-        # 1. 期間指定フィルタ
-        with st.container(border=True):
-            f_col1, f_col2 = st.columns([2, 2])
-            
-            # 抽出期間の選択 (初期値は今月の1日〜今日)
-            today = datetime.now()
-            first_day_of_month = today.replace(day=1)
-            
-            with f_col1:
-                date_range = st.date_input(
-                    "📅 抽出期間を選択 (開始日 〜 終了日)",
-                    value=(first_day_of_month, today),
-                    help="カレンダーで開始日と終了日を選択してください。一週間分や一ヶ月分を自由に指定できます。"
-                )
-            
-            with f_col2:
-                search_kw = st.text_input("🔑 内容キーワードで絞り込み (任意)", placeholder="例: 打合せ 現場")
-
-        # 期間が正しく選択されているか確認
-        if isinstance(date_range, tuple) and len(date_range) == 2:
-            start_date, end_date = date_range
-            
-            # 2. Supabaseから指定期間のデータを一括取得
-            res = supabase.table("nippo").select("*") \
-                .eq("user_id", user.id) \
-                .gte("date", str(start_date)) \
-                .lte("date", str(end_date)) \
-                .order("date", desc=True).execute()
-            
+            res = supabase.table("staff").select("*").eq("staff_id", saved_id).eq("session_key", saved_key).execute()
             if res.data:
-                df = pd.DataFrame(res.data)
-                
-                # キーワード絞り込み（手動）
-                if search_kw:
-                    patt = "|".join(search_kw.replace("　", " ").split(" "))
-                    df = df[df["content"].str.contains(patt, na=False)]
+                st.session_state.logged_in = True
+                st.session_state.staff_info = res.data[0]
+                st.rerun()
+        except: pass
 
-                # --- 統計とCSV出力ボタン ---
-                c1, c2 = st.columns([3, 1])
-                c1.write(f"📊 **{start_date}** から **{end_date}** の表示結果: **{len(df)} 件**")
-                
-                # 【重要】表示されている全データをCSV化
-                csv_all = df[["date", "person", "location", "content"]].rename(
-                    columns={"date":"日付","person":"担当者","location":"場所","content":"内容"}
-                ).to_csv(index=False).encode('utf-8-sig')
-                
-                c2.download_button(
-                    label="📥 表示全データをCSV出力",
-                    data=csv_all,
-                    file_name=f"nippo_{start_date}_to_{end_date}.csv",
-                    mime="text/csv",
-                    use_container_width=True
-                )
+# --- A. ログイン画面 ---
+if not st.session_state.logged_in:
+    c_l, c_m, c_r = st.columns([1, 2, 1])
+    with c_m:
+        if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
+        st.markdown(f"<h1 style='text-align: center; color: #75C9D7;'>{APP_TITLE}</h1>", unsafe_allow_html=True)
+        with st.form("login_form"):
+            u_id = st.text_input("STAFF ID")
+            u_pw = st.text_input("PASSWORD", type="password")
+            if st.form_submit_button("SYSTEM LOGIN", use_container_width=True):
+                res = supabase.table("staff").select("*").eq("staff_id", u_id).eq("password", u_pw).execute()
+                if res.data:
+                    new_key = str(uuid.uuid4())
+                    supabase.table("staff").update({"session_key": new_key}).eq("staff_id", u_id).execute()
+                    streamlit_js_eval(js_expressions=f'localStorage.setItem("staff_id", "{u_id}")')
+                    streamlit_js_eval(js_expressions=f'localStorage.setItem("session_key", "{new_key}")')
+                    st.session_state.logged_in = True
+                    st.session_state.staff_info = res.data[0]
+                    st.rerun()
+                else: st.error("ID / PW不一致")
+    st_autorefresh(interval=2000, limit=3, key="sync_wait")
+    st.stop()
 
-                st.info("💡 行をクリックすると、そのデータを下に個別編集・削除できます。")
-                
-                # 3. 選択機能付きデータフレーム
-                event = st.dataframe(
-                    df[["date", "person", "location", "content"]].rename(columns={"date":"日付","person":"担当者","location":"場所","content":"内容"}),
-                    use_container_width=True,
-                    on_select="rerun",
-                    selection_mode="single-row",
-                    hide_index=True
-                )
+# --- 4. 共通データ同期（ログイン後） ---
+staff = st.session_state.staff_info
+now_jst = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=9)
+today_jst = now_jst.date().isoformat()
 
-                # 4. 個別編集・削除処理
-                if hasattr(event, 'selection') and len(event.selection.rows) > 0:
-                    row_idx = event.selection.rows[0]
-                    selected = df.iloc[row_idx]
-                    
-                    st.markdown("---")
-                    st.subheader(f"🛠️ 選択中のデータを編集 (元の日付: {selected['date']})")
-                    
-                    with st.container(border=True):
-                        u_date = st.date_input("修正日", value=datetime.strptime(selected['date'], '%Y-%m-%d'))
-                        u_name = st.text_input("修正名", value=selected['person'])
-                        u_loc = st.text_input("修正場所", value=selected['location'])
-                        u_cont = st.text_area("修正内容", value=selected['content'])
-                        
-                        b1, b2 = st.columns(2)
-                        if b1.button("🚀 この行を更新する"):
-                            supabase.table("nippo").update({"date":str(u_date),"person":u_name,"location":u_loc,"content":u_cont}).eq("id", selected['id']).execute()
-                            st.success("更新しました")
-                            st.rerun()
-                        if b2.button("🗑️ この行を削除する"):
-                            supabase.table("nippo").delete().eq("id", selected['id']).execute()
-                            st.success("削除しました")
-                            st.rerun()
-            else:
-                st.warning(f"指定された期間 ({start_date} 〜 {end_date}) にデータはありません。")
+# セッション有効チェック
+check_res = supabase.table("staff").select("session_key").eq("id", staff['id']).single().execute()
+if not check_res.data or check_res.data['session_key'] is None:
+    streamlit_js_eval(js_expressions='localStorage.clear()')
+    st.session_state.logged_in = False; st.rerun()
+
+# 同期データ取得
+t_res = supabase.table("timecards").select("*").eq("staff_id", staff['id']).is_("clock_out_at", "null").order("clock_in_at", desc=True).limit(1).execute()
+curr_card = t_res.data[0] if t_res.data else None
+b_res = supabase.table("breaks").select("*").eq("staff_id", staff['id']).is_("break_end_at", "null").order("break_start_at", desc=True).limit(1).execute()
+on_break = b_res.data[0] if b_res.data else None
+
+# 今日のタスク枠の自動生成（1日1回）
+try:
+    exist_check = supabase.table("task_logs").select("id").eq("work_date", today_jst).limit(1).execute()
+    if not exist_check.data:
+        tm_data = supabase.table("task_master").select("*").execute()
+        for tm in tm_data.data:
+            supabase.table("task_logs").insert({"task_id": tm["id"], "work_date": today_jst, "status": "pending"}).execute()
+        st.cache_data.clear(); st.rerun()
+except: pass
+
+# タスクデータ取得
+logs_res = supabase.table("task_logs").select("*, task_master(*, locations(*))").eq("work_date", today_jst).execute()
+l_data = sorted(logs_res.data, key=lambda x: (x['task_master']['target_hour'] or 0, x['task_master']['target_minute'] or 0))
+active_task = next((l for l in l_data if l['status'] == "in_progress" and l['staff_id'] == staff['id'] and l['task_master']['target_hour'] == now_jst.hour), None)
+
+if not active_task: st_autorefresh(interval=30000, key="global_ref")
+is_mobile = (streamlit_js_eval(js_expressions='window.innerWidth', key='W_WIDTH', want_output=True) or 1000) < 768
+
+def decode_qr(image):
+    try:
+        file_bytes = np.asarray(bytearray(image.read()), dtype=np.uint8)
+        opencv_image = cv2.imdecode(file_bytes, 1); detector = cv2.QRCodeDetector()
+        data, _, _ = detector.detectAndDecode(opencv_image)
+        return data
+    except: return ""
+
+def render_task_execution(task):
+    st.markdown(f"<div class='app-card'><h2 style='color:#75C9D7;margin:0;'>📍 遂行中: {task['task_master']['locations']['name']}</h2></div>", unsafe_allow_html=True)
+    if st.button("⏸️ 中断してリストに戻る", use_container_width=True):
+        supabase.table("task_logs").update({"status": "interrupted"}).eq("id", task['id']).execute(); st.rerun()
+    st.divider()
+    v_key = f"v_{task['id']}"
+    if v_key not in st.session_state: st.session_state[v_key] = False
+    if not st.session_state[v_key]:
+        qr_in = st.camera_input("1. 現場QRを撮影して認証", key=f"qr_{task['id']}")
+        if qr_in and decode_qr(qr_in) == task['task_master']['locations']['qr_token']:
+            st.session_state[v_key] = True; st.rerun()
+    else:
+        ph_in = st.camera_input("2. 完了写真を撮影", key=f"ph_{task['id']}")
+        if ph_in and st.button("✅ 報告送信", type="primary", use_container_width=True):
+            f_p = f"{task['id']}.jpg"
+            supabase.storage.from_("task-photos").upload(f_p, ph_in.getvalue(), {"upsert":"true"})
+            supabase.table("task_logs").update({"status":"completed","completed_at":now_jst.isoformat(),"photo_url":f_p}).eq("id",task['id']).execute()
+            del st.session_state[v_key]; st.balloons(); st.rerun()
+
+# --- B. サイドバー ---
+if is_mobile and active_task and not on_break: render_task_execution(active_task); st.stop()
+
+with st.sidebar:
+    if os.path.exists("logo.png"): st.image("logo.png", use_container_width=True)
+    st.markdown(f"<div style='text-align:center; padding:10px; color:#000000;'><b>{staff['name']} 様</b></div>", unsafe_allow_html=True)
+    st.divider()
+    menu_list = ["📋 本日の業務", "⚠️ 未完了タスク", "🕒 履歴"]
+    if staff['role'] == 'admin': menu_list += ["📊 監視(Admin)", "📅 出勤簿(Admin)"]
+    choice = st.radio("MENU", menu_list, key="nav")
+    for _ in range(8): st.write("")
+    if st.button("🚪 ログアウト", key="logout_btn", use_container_width=True):
+        supabase.table("staff").update({"session_key": None}).eq("id", staff['id']).execute()
+        streamlit_js_eval(js_expressions='localStorage.clear()'); st.session_state.logged_in = False; st.rerun()
+
+# --- C. メインエリア表示 ---
+st.markdown(f"<h1 style='color: #75C9D7; margin-top: 0; margin-bottom: 0;'>{APP_TITLE}</h1>", unsafe_allow_html=True)
+st.caption(f"{now_jst.strftime('%H:%M')} | {staff['name']}")
+
+if choice == "📋 本日の業務":
+    st.markdown("<div class='app-card'>", unsafe_allow_html=True)
+    st.subheader("🕙 TIME CARD")
+    c1, c2, c3 = st.columns(3)
+    if not curr_card:
+        if c1.button("🚀 出勤打刻", use_container_width=True):
+            supabase.table("timecards").insert({"staff_id": staff['id'], "staff_name": staff['name'], "clock_in_at": now_jst.isoformat(), "work_date": today_jst}).execute(); st.rerun()
+    else:
+        st.write(f"出勤中: **{curr_card['clock_in_at'][11:16]}**")
+        if not on_break:
+            if c2.button("☕ 休憩", use_container_width=True):
+                supabase.table("breaks").insert({"staff_id": staff['id'], "timecard_id": curr_card['id'], "break_start_at": now_jst.isoformat(), "work_date": today_jst}).execute(); st.rerun()
+            if c3.button("🏁 退勤", use_container_width=True, type="primary"):
+                supabase.table("timecards").update({"clock_out_at": now_jst.isoformat()}).eq("id", curr_card['id']).execute(); st.rerun()
         else:
-            st.info("カレンダーで開始日と終了日の両方を選択してください。")
+            st.warning("休憩中")
+            if c2.button("🏃 復帰", use_container_width=True, type="primary"):
+                supabase.table("breaks").update({"break_end_at": now_jst.isoformat()}).eq("id", on_break['id']).execute(); st.rerun()
+    st.markdown("</div>", unsafe_allow_html=True)
 
-if st.session_state.user is None:
-    auth_screen()
-else:
-    main_app()
+    if curr_card and not on_break:
+        if not is_mobile and active_task: render_task_execution(active_task)
+        st.markdown("<div class='app-card'>", unsafe_allow_html=True)
+        st.subheader(f"📋 今のタスク ({now_jst.hour:02d}時台)")
+        tasks_now = [l for l in l_data if l['task_master']['target_hour'] == now_jst.hour]
+        if not tasks_now: st.info("予定はありません。")
+        else:
+            for l in tasks_now:
+                st.markdown("<div style='border-bottom: 1px solid #EDF2F7; padding: 15px 0;'>", unsafe_allow_html=True)
+                ca, cb = st.columns([3, 1])
+                ca.write(f"**【{l['task_master']['target_hour']:02d}:{l['task_master']['target_minute']:02d}】 {l['task_master']['locations']['name']}**\n{l['task_master']['task_name']}")
+                if l['status'] in ["pending", "interrupted"]:
+                    if cb.button("着手" if l['status']=="pending" else "再開", key=f"s_{l['id']}", use_container_width=True):
+                        supabase.table("task_logs").update({"status":"in_progress","staff_id":staff['id']}).eq("id",l['id']).execute(); st.rerun()
+                elif l['status'] == "in_progress": cb.warning("対応中")
+                else: cb.success("完了")
+                st.markdown("</div>", unsafe_allow_html=True)
+        st.markdown("</div>", unsafe_allow_html=True)
+
+elif choice == "⚠️ 未完了タスク":
+    overdue = [l for l in l_data if l['task_master']['target_hour'] < now_jst.hour and l['status'] != "completed"]
+    if not overdue: st.success("全て完了しています！")
+    else:
+        for l in overdue:
+            st.markdown("<div class='app-card'>", unsafe_allow_html=True)
+            ca, cb = st.columns([3, 1])
+            ca.write(f"**【遅延】{l['task_master']['target_hour']:02d}:{l['task_master']['target_minute']:02d} - {l['task_master']['locations']['name']}**\n{l['task_master']['task_name']}")
+            if cb.button("リカバリー", key=f"rec_{l['id']}", use_container_width=True, type="primary"):
+                supabase.table("task_logs").update({"status":"in_progress","staff_id":staff['id']}).eq("id",l['id']).execute(); st.rerun()
+            st.markdown("</div>", unsafe_allow_html=True)
+
+elif choice == "🕒 履歴":
+    st.markdown("<div class='app-card'>", unsafe_allow_html=True)
+    res = supabase.table("timecards").select("*, breaks(*)").eq("staff_id", staff['id']).order("clock_in_at", desc=True).limit(10).execute()
+    for r in res.data:
+        c_in, c_out = datetime.datetime.fromisoformat(r['clock_in_at']), (datetime.datetime.fromisoformat(r['clock_out_at']) if r['clock_out_at'] else None)
+        br_m = sum([int((datetime.datetime.fromisoformat(b['break_end_at']) - datetime.datetime.fromisoformat(b['break_start_at'])).total_seconds() // 60) for b in r.get('breaks', []) if b['break_end_at']])
+        act_m = (int((c_out - c_in).total_seconds() // 60) - br_m) if c_out else 0
+        h, m = divmod(act_m, 60)
+        t_color = "red" if act_m >= 420 else "#000000"
+        st.markdown(f"**📅 {c_in.strftime('%Y年%m月%d日')}** / {c_in.strftime('%H:%M')}〜 / <span style='color:{t_color}; font-weight:bold;'>実働：{h:02d}:{m:02d}</span>", unsafe_allow_html=True)
+    st.markdown("</div>", unsafe_allow_html=True)
+
+elif choice == "📊 監視(Admin)":
+    l_adm = [l for l in l_data if l['status'] == 'completed']
+    for l in l_adm:
+        with st.container():
+            st.markdown("<div class='app-card'>", unsafe_allow_html=True)
+            st.write(f"**{l['task_master']['locations']['name']}** (完了: {l['completed_at'][11:16]})")
+            st.image(f"{url}/storage/v1/object/public/task-photos/{l['photo_url']}")
+            st.markdown("</div>", unsafe_allow_html=True)
+
+elif choice == "📅 出勤簿(Admin)":
+    st.markdown("<div class='app-card'>", unsafe_allow_html=True)
+    all_s = supabase.table("staff").select("id, name").execute()
+    s_dict = {s['name']: s['id'] for s in all_s.data}
+    ca, cb, cc = st.columns(3)
+    target = ca.selectbox("STAFF", ["-- 全員 --"] + list(s_dict.keys()))
+    s_d, e_d = cb.date_input("START", datetime.date.today()-datetime.timedelta(days=30)), cb.date_input("END", datetime.date.today())
+    q = supabase.table("timecards").select("*, breaks(*)").gte("work_date", s_d.isoformat()).lte("work_date", e_d.isoformat())
+    if target != "-- 全員 --": q = q.eq("staff_id", s_dict[target])
+    data = q.order("work_date", desc=True).execute()
+    if data.data:
+        df_l = []
+        for r in data.data:
+            c_in = datetime.datetime.fromisoformat(r['clock_in_at'])
+            c_out = datetime.datetime.fromisoformat(r['clock_out_at']) if r['clock_out_at'] else None
+            br_m = sum([int((datetime.datetime.fromisoformat(b['break_end_at']) - datetime.datetime.fromisoformat(b['break_start_at'])).total_seconds() // 60) for b in r.get('breaks', []) if b['break_end_at']])
+            act_m = (int((c_out - c_in).total_seconds() // 60) - br_m) if c_out else 0
+            h, m = divmod(act_m, 60)
+            df_l.append({"名前": r['staff_name'], "日付": r['work_date'], "出勤": c_in.strftime("%H:%M"), "退勤": c_out.strftime("%H:%M") if c_out else "未", "休憩(分)": br_m, "実働(00:00)": f"{h:02d}:{m:02d}", "分": act_m})
+        df = pd.DataFrame(df_l)
+        def style_red_7h(row): return ['color: red' if row['分'] >= 420 else '' for _ in row]
+        st.dataframe(df.style.apply(style_red_7h, axis=1).hide(axis='columns', subset=['分']), use_container_width=True)
